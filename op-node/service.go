@@ -8,15 +8,19 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Layr-Labs/eigenda/api/grpc/retriever"
 	"github.com/ethereum-optimism/optimism/op-node/chaincfg"
 	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
 
+	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/flags"
 	"github.com/ethereum-optimism/optimism/op-node/node"
 	p2pcli "github.com/ethereum-optimism/optimism/op-node/p2p/cli"
@@ -71,6 +75,11 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		haltOption = ""
 	}
 
+	daCfg, err := NewDAConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load da config: %w", err)
+	}
+
 	cfg := &node.Config{
 		L1:     l1Endpoint,
 		L2:     l2Endpoint,
@@ -105,6 +114,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		Sync:              *syncConfig,
 		RollupHalt:        haltOption,
 		RethDBPath:        ctx.String(flags.L1RethDBPath.Name),
+		DAConfig:          daCfg,
 	}
 
 	if err := cfg.LoadPersisted(log); err != nil {
@@ -248,4 +258,18 @@ func NewSyncConfig(ctx *cli.Context) *sync.Config {
 		EngineSync:         ctx.Bool(flags.L2EngineSyncEnabled.Name),
 		SkipSyncStartCheck: ctx.Bool(flags.SkipSyncStartCheck.Name),
 	}
+}
+
+func NewDAConfig(ctx *cli.Context) (da.DAConfig, error) {
+	rpc := ctx.String(flags.DaRPC.Name)
+	conn, err := grpc.Dial(rpc, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return da.DAConfig{}, err
+	}
+	client := retriever.NewRetrieverClient(conn)
+
+	return da.DAConfig{
+		Rpc:    rpc,
+		Client: client,
+	}, nil
 }

@@ -38,7 +38,7 @@ class ChildProcess:
         try:
             func(*args)
         except Exception as e:
-            self.errq.put(str(e))
+            self.errq.put(e)
 
     def start(self):
         self.process.start()
@@ -123,6 +123,7 @@ def deploy_contracts(paths):
     res = eth_accounts('127.0.0.1:8545')
 
     response = json.loads(res)
+    print(response)
     account = response['result'][0]
     log.info(f'Deploying with {account}')
 
@@ -146,7 +147,10 @@ def deploy_contracts(paths):
         '--unlocked'
     ], env={}, cwd=paths.contracts_bedrock_dir)
 
-    shutil.copy(paths.l1_deployments_path, paths.addresses_json_path)
+    if os.path.exists(paths.l1_deployments_path):
+      shutil.copy(paths.l1_deployments_path, paths.addresses_json_path)
+    else:
+        raise Exception(f"File {paths.l1_deployments_path} does not exist for copy")
 
     log.info('Syncing contracts.')
     run_command([
@@ -367,20 +371,28 @@ def run_command_preset(command: CommandPreset):
             proc.kill()
     return proc.returncode
 
-
-def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None):
+def run_command(args, check=True, shell=False, cwd=None, env=None):
     env = env if env else {}
-    return subprocess.run(
+    completed_process = subprocess.run(
         args,
-        check=check,
+        check=False,  # Handle the check manually for custom error messages
         shell=shell,
-        env={
-            **os.environ,
-            **env
-        },
+        env={**os.environ, **env},
         cwd=cwd,
-        timeout=timeout
+        stderr=subprocess.PIPE,  # Capture stderr
+        text=True  # Convert output to string
     )
+
+    # Check if the subprocess was successful
+    if check and completed_process.returncode != 0:
+        # Raise an exception with stderr as the error message
+        raise subprocess.CalledProcessError(
+            completed_process.returncode,
+            completed_process.args,
+            stderr=completed_process.stderr.strip()
+        )
+
+    return completed_process
 
 
 def wait_up(port, retries=10, wait_secs=1):
