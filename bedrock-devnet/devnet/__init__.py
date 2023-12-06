@@ -8,6 +8,7 @@ import calendar
 import datetime
 import time
 import shutil
+import sys
 import http.client
 from multiprocessing import Process, Queue
 import concurrent.futures
@@ -29,12 +30,36 @@ class Bunch:
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
 
+# class ChildProcess:
+#     def __init__(self, func, *args):
+#         self.errq = Queue()
+#         self.process = Process(target=self._func, args=(func, args))
+
+#     def _func(self, func, args):
+#         try:
+#             func(*args)
+#         except Exception as e:
+#             self.errq.put(e)
+
+#     def start(self):
+#         self.process.start()
+
+#     def join(self):
+#         self.process.join()
+
+#     def get_error(self):
+#         return self.errq.get() if not self.errq.empty() else None
+
 class ChildProcess:
     def __init__(self, func, *args):
         self.errq = Queue()
         self.process = Process(target=self._func, args=(func, args))
 
     def _func(self, func, args):
+        # Redirect stdout and stderr to the parent process's stdout and stderr
+        os.dup2(sys.__stdout__.fileno(), sys.stdout.fileno())
+        os.dup2(sys.__stderr__.fileno(), sys.stderr.fileno())
+
         try:
             func(*args)
         except Exception as e:
@@ -371,6 +396,30 @@ def run_command_preset(command: CommandPreset):
             proc.kill()
     return proc.returncode
 
+# def run_command(args, check=True, shell=False, cwd=None, env=None):
+#     env = env if env else {}
+#     completed_process = subprocess.run(
+#         args,
+#         check=False,  # Handle the check manually for custom error messages
+#         shell=shell,
+#         env={**os.environ, **env},
+#         cwd=cwd,
+#         stderr=subprocess.PIPE,  # Capture stderr
+#         text=True  # Convert output to string
+#     )
+
+#     # Check if the subprocess was successful
+#     if check and completed_process.returncode != 0:
+#         # Raise an exception with stderr as the error message
+#         raise subprocess.CalledProcessError(
+#             completed_process.returncode,
+#             completed_process.args,
+#             stderr=completed_process.stderr.strip()
+#         )
+
+#     return completed_process
+
+
 def run_command(args, check=True, shell=False, cwd=None, env=None):
     env = env if env else {}
     completed_process = subprocess.run(
@@ -379,17 +428,17 @@ def run_command(args, check=True, shell=False, cwd=None, env=None):
         shell=shell,
         env={**os.environ, **env},
         cwd=cwd,
-        stderr=subprocess.PIPE,  # Capture stderr
+        # Removed the stderr=subprocess.PIPE to allow stderr to be output to the caller's stderr
         text=True  # Convert output to string
     )
 
     # Check if the subprocess was successful
     if check and completed_process.returncode != 0:
-        # Raise an exception with stderr as the error message
+        # Raise an exception with return code and command arguments
         raise subprocess.CalledProcessError(
             completed_process.returncode,
-            completed_process.args,
-            stderr=completed_process.stderr.strip()
+            completed_process.args
+            # Removed stderr from the exception to avoid duplicating error messages
         )
 
     return completed_process
