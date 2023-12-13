@@ -155,15 +155,15 @@ func DataFromEVMTransactions(config *rollup.Config, daCfg *da.DAConfig, batcherA
 				blobRes, err := daCfg.Client.RetrieveBlob(context.Background(), blobRequest)
 				if err != nil {
 					retrieveReqJSON, _ := json.Marshal(struct {
-						batch_header_hash      string
-						blob_index             uint32
-						reference_block_number uint32
-						quorum_id              uint32
+						BatchHeaderHash      string
+						BlobIndex            uint32
+						ReferenceBlockNumber uint32
+						QuorumId             uint32
 					}{
-						batch_header_hash:      base64.StdEncoding.EncodeToString(frameRef.BatchHeaderHash),
-						blob_index:             frameRef.BlobIndex,
-						reference_block_number: frameRef.ReferenceBlockNumber,
-						quorum_id:              frameRef.QuorumIds[0],
+						BatchHeaderHash:      base64.StdEncoding.EncodeToString(frameRef.BatchHeaderHash),
+						BlobIndex:            frameRef.BlobIndex,
+						ReferenceBlockNumber: frameRef.ReferenceBlockNumber,
+						QuorumId:             frameRef.QuorumIds[0],
 					})
 					log.Warn("could not retrieve data from EigenDA", "request", string(retrieveReqJSON), "err", err)
 					return nil
