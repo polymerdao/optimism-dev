@@ -1,8 +1,8 @@
 package da
 
-import "github.com/Layr-Labs/eigenda/api/grpc/retriever"
+import "github.com/Layr-Labs/eigenda/api/grpc/disperser"
 
 type DAConfig struct {
 	Rpc    string
-	Client retriever.RetrieverClient
+	Client disperser.DisperserClient
 }

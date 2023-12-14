@@ -89,7 +89,7 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
-      --da-rpc=host.docker.internal:32026
+      --da-rpc=host.docker.internal:32003
     ports:
       - "7545:8545"
       - "9003:9003"
@@ -130,7 +130,7 @@ services:
       OP_PROPOSER_METRICS_ENABLED: "true"
       OP_PROPOSER_ALLOW_NON_FINALIZED: "true"
       OP_PROPOSER_RPC_ENABLE_ADMIN: "true"
-      OP_PROPOSER_DA_RPC: host.docker.internal:32026
+      OP_PROPOSER_DA_RPC: host.docker.internal:32003
       OP_PROPOSER_DA_PRIMARY_QUORUM_ID: 0
       OP_PROPOSER_DA_PRIMARY_ADVERSARY_THRESHOLD: 40
       OP_PROPOSER_DA_PRIMARY_QUORUM_THRESHOLD: 60

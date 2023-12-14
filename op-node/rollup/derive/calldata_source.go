@@ -8,13 +8,13 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/retriever"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -146,11 +146,9 @@ func DataFromEVMTransactions(config *rollup.Config, daCfg *da.DAConfig, batcherA
 				}
 
 				log.Info("requesting data from EigenDA", "quorum id", frameRef.QuorumIds[0], "confirmation block number", frameRef.ReferenceBlockNumber)
-				blobRequest := &retriever.BlobRequest{
-					BatchHeaderHash:      frameRef.BatchHeaderHash,
-					BlobIndex:            frameRef.BlobIndex,
-					ReferenceBlockNumber: frameRef.ReferenceBlockNumber,
-					QuorumId:             frameRef.QuorumIds[0],
+				blobRequest := &disperser.RetrieveBlobRequest{
+					BatchHeaderHash: frameRef.BatchHeaderHash,
+					BlobIndex:       frameRef.BlobIndex,
 				}
 				blobRes, err := daCfg.Client.RetrieveBlob(context.Background(), blobRequest)
 				if err != nil {

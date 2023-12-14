@@ -8,7 +8,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/retriever"
+	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -54,14 +54,14 @@ type calldataTest struct {
 	txs  []testTx
 }
 
-var _ retriever.RetrieverClient = RetrieverClientMock{}
+var _ disperser.DisperserClient = &DisperserClientMock{}
 
-type RetrieverClientMock struct {
-	Responses     []*retriever.BlobReply
+type DisperserClientMock struct {
+	Responses     []*disperser.RetrieveBlobReply
 	ResponseIndex int
 }
 
-func (c RetrieverClientMock) RetrieveBlob(ctx context.Context, in *retriever.BlobRequest, opts ...grpc.CallOption) (*retriever.BlobReply, error) {
+func (c *DisperserClientMock) RetrieveBlob(ctx context.Context, in *disperser.RetrieveBlobRequest, opts ...grpc.CallOption) (*disperser.RetrieveBlobReply, error) {
 	if c.ResponseIndex < len(c.Responses) {
 		res := c.Responses[c.ResponseIndex]
 		c.ResponseIndex += 1
@@ -71,8 +71,16 @@ func (c RetrieverClientMock) RetrieveBlob(ctx context.Context, in *retriever.Blo
 	}
 }
 
-func NewRetrieverClientMock(responses []*retriever.BlobReply) retriever.RetrieverClient {
-	return &RetrieverClientMock{
+func (c *DisperserClientMock) DisperseBlob(ctx context.Context, in *disperser.DisperseBlobRequest, opts ...grpc.CallOption) (*disperser.DisperseBlobReply, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (c *DisperserClientMock) GetBlobStatus(ctx context.Context, in *disperser.BlobStatusRequest, opts ...grpc.CallOption) (*disperser.BlobStatusReply, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func NewDisperserClientMock(responses []*disperser.RetrieveBlobReply) disperser.DisperserClient {
+	return &DisperserClientMock{
 		Responses:     responses,
 		ResponseIndex: 0,
 	}
@@ -91,7 +99,7 @@ func TestDataFromEVMTransactions(t *testing.T) {
 
 	daCfg := &da.DAConfig{
 		Rpc: "",
-		Client: NewRetrieverClientMock([]*retriever.BlobReply{
+		Client: NewDisperserClientMock([]*disperser.RetrieveBlobReply{
 			{
 				Data: []byte{0x00, 0x01, 0x02},
 			},

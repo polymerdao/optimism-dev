@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/retriever"
+	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum-optimism/optimism/op-node/chaincfg"
 	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
@@ -266,7 +266,7 @@ func NewDAConfig(ctx *cli.Context) (da.DAConfig, error) {
 	if err != nil {
 		return da.DAConfig{}, err
 	}
-	client := retriever.NewRetrieverClient(conn)
+	client := disperser.NewDisperserClient(conn)
 
 	return da.DAConfig{
 		Rpc:    rpc,
