@@ -13,22 +13,26 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-const (
-	methodGameDuration     = "GAME_DURATION"
-	methodMaxGameDepth     = "MAX_GAME_DEPTH"
-	methodAbsolutePrestate = "ABSOLUTE_PRESTATE"
-	methodStatus           = "status"
-	methodClaimCount       = "claimDataLen"
-	methodClaim            = "claimData"
-	methodL1Head           = "l1Head"
-	methodProposals        = "proposals"
-	methodResolve          = "resolve"
-	methodResolveClaim     = "resolveClaim"
-	methodAttack           = "attack"
-	methodDefend           = "defend"
-	methodStep             = "step"
-	methodAddLocalData     = "addLocalData"
-	methodVM               = "VM"
+var (
+	methodGameDuration       = "gameDuration"
+	methodMaxGameDepth       = "maxGameDepth"
+	methodAbsolutePrestate   = "absolutePrestate"
+	methodStatus             = "status"
+	methodClaimCount         = "claimDataLen"
+	methodClaim              = "claimData"
+	methodL1Head             = "l1Head"
+	methodResolve            = "resolve"
+	methodResolveClaim       = "resolveClaim"
+	methodAttack             = "attack"
+	methodDefend             = "defend"
+	methodStep               = "step"
+	methodAddLocalData       = "addLocalData"
+	methodVM                 = "vm"
+	methodGenesisBlockNumber = "genesisBlockNumber"
+	methodGenesisOutputRoot  = "genesisOutputRoot"
+	methodSplitDepth         = "splitDepth"
+	methodL2BlockNumber      = "l2BlockNumber"
+	methodRequiredBond       = "getRequiredBond"
 )
 
 type FaultDisputeGameContract struct {
@@ -36,37 +40,93 @@ type FaultDisputeGameContract struct {
 	contract    *batching.BoundContract
 }
 
-// contractProposal matches the structure for output root proposals used by the contracts.
-// It must exactly match the contract structure. The exposed API uses Proposal to decouple the contract
-// and challenger representations of the proposal data.
-type contractProposal struct {
-	Index         *big.Int
-	L2BlockNumber *big.Int
-	OutputRoot    common.Hash
-}
-
 type Proposal struct {
 	L2BlockNumber *big.Int
 	OutputRoot    common.Hash
 }
 
-func asProposal(p contractProposal) Proposal {
-	return Proposal{
-		L2BlockNumber: p.L2BlockNumber,
-		OutputRoot:    p.OutputRoot,
-	}
-}
-
 func NewFaultDisputeGameContract(addr common.Address, caller *batching.MultiCaller) (*FaultDisputeGameContract, error) {
-	fdgAbi, err := bindings.FaultDisputeGameMetaData.GetAbi()
+	contractAbi, err := bindings.FaultDisputeGameMetaData.GetAbi()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load fault dispute game ABI: %w", err)
 	}
 
 	return &FaultDisputeGameContract{
 		multiCaller: caller,
-		contract:    batching.NewBoundContract(fdgAbi, addr),
+		contract:    batching.NewBoundContract(contractAbi, addr),
 	}, nil
+}
+
+// GetBlockRange returns the block numbers of the absolute pre-state block (typically genesis or the bedrock activation block)
+// and the post-state block (that the proposed output root is for).
+func (c *FaultDisputeGameContract) GetBlockRange(ctx context.Context) (prestateBlock uint64, poststateBlock uint64, retErr error) {
+	results, err := c.multiCaller.Call(ctx, batching.BlockLatest,
+		c.contract.Call(methodGenesisBlockNumber),
+		c.contract.Call(methodL2BlockNumber))
+	if err != nil {
+		retErr = fmt.Errorf("failed to retrieve game block range: %w", err)
+		return
+	}
+	if len(results) != 2 {
+		retErr = fmt.Errorf("expected 2 results but got %v", len(results))
+		return
+	}
+	prestateBlock = results[0].GetBigInt(0).Uint64()
+	poststateBlock = results[1].GetBigInt(0).Uint64()
+	return
+}
+
+func (c *FaultDisputeGameContract) GetGenesisOutputRoot(ctx context.Context) (common.Hash, error) {
+	genesisOutputRoot, err := c.multiCaller.SingleCall(ctx, batching.BlockLatest, c.contract.Call(methodGenesisOutputRoot))
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to retrieve genesis output root: %w", err)
+	}
+	return genesisOutputRoot.GetHash(0), nil
+}
+
+func (c *FaultDisputeGameContract) GetSplitDepth(ctx context.Context) (types.Depth, error) {
+	splitDepth, err := c.multiCaller.SingleCall(ctx, batching.BlockLatest, c.contract.Call(methodSplitDepth))
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve split depth: %w", err)
+	}
+	return types.Depth(splitDepth.GetBigInt(0).Uint64()), nil
+}
+
+func (c *FaultDisputeGameContract) GetRequiredBond(ctx context.Context, position types.Position) (*big.Int, error) {
+	bond, err := c.multiCaller.SingleCall(ctx, batching.BlockLatest, c.contract.Call(methodRequiredBond, position.ToGIndex()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve required bond: %w", err)
+	}
+	return bond.GetBigInt(0), nil
+}
+
+func (f *FaultDisputeGameContract) UpdateOracleTx(ctx context.Context, claimIdx uint64, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
+	if data.IsLocal {
+		return f.addLocalDataTx(claimIdx, data)
+	}
+	return f.addGlobalDataTx(ctx, data)
+}
+
+func (f *FaultDisputeGameContract) addLocalDataTx(claimIdx uint64, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
+	call := f.contract.Call(
+		methodAddLocalData,
+		data.GetIdent(),
+		new(big.Int).SetUint64(claimIdx),
+		new(big.Int).SetUint64(uint64(data.OracleOffset)),
+	)
+	return call.ToTxCandidate()
+}
+
+func (f *FaultDisputeGameContract) addGlobalDataTx(ctx context.Context, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
+	vm, err := f.vm(ctx)
+	if err != nil {
+		return txmgr.TxCandidate{}, err
+	}
+	oracle, err := vm.Oracle(ctx)
+	if err != nil {
+		return txmgr.TxCandidate{}, err
+	}
+	return oracle.AddGlobalDataTx(data)
 }
 
 func (f *FaultDisputeGameContract) GetGameDuration(ctx context.Context) (uint64, error) {
@@ -77,12 +137,12 @@ func (f *FaultDisputeGameContract) GetGameDuration(ctx context.Context) (uint64,
 	return result.GetUint64(0), nil
 }
 
-func (f *FaultDisputeGameContract) GetMaxGameDepth(ctx context.Context) (uint64, error) {
+func (f *FaultDisputeGameContract) GetMaxGameDepth(ctx context.Context) (types.Depth, error) {
 	result, err := f.multiCaller.SingleCall(ctx, batching.BlockLatest, f.contract.Call(methodMaxGameDepth))
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch max game depth: %w", err)
 	}
-	return result.GetBigInt(0).Uint64(), nil
+	return types.Depth(result.GetBigInt(0).Uint64()), nil
 }
 
 func (f *FaultDisputeGameContract) GetAbsolutePrestateHash(ctx context.Context) (common.Hash, error) {
@@ -99,19 +159,6 @@ func (f *FaultDisputeGameContract) GetL1Head(ctx context.Context) (common.Hash, 
 		return common.Hash{}, fmt.Errorf("failed to fetch L1 head: %w", err)
 	}
 	return result.GetHash(0), nil
-}
-
-// GetProposals returns the agreed and disputed proposals
-func (f *FaultDisputeGameContract) GetProposals(ctx context.Context) (Proposal, Proposal, error) {
-	result, err := f.multiCaller.SingleCall(ctx, batching.BlockLatest, f.contract.Call(methodProposals))
-	if err != nil {
-		return Proposal{}, Proposal{}, fmt.Errorf("failed to fetch proposals: %w", err)
-	}
-
-	var agreed, disputed contractProposal
-	result.GetStruct(0, &agreed)
-	result.GetStruct(1, &disputed)
-	return asProposal(agreed), asProposal(disputed), nil
 }
 
 func (f *FaultDisputeGameContract) GetStatus(ctx context.Context) (gameTypes.GameStatus, error) {
@@ -221,47 +268,22 @@ func (f *FaultDisputeGameContract) resolveCall() *batching.ContractCall {
 	return f.contract.Call(methodResolve)
 }
 
-func (f *FaultDisputeGameContract) UpdateOracleTx(ctx context.Context, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
-	if data.IsLocal {
-		return f.addLocalDataTx(data)
-	}
-	return f.addGlobalDataTx(ctx, data)
-}
-
-func (f *FaultDisputeGameContract) addLocalDataTx(data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
-	call := f.contract.Call(
-		methodAddLocalData,
-		data.GetIdent(),
-		data.LocalContext,
-		new(big.Int).SetUint64(uint64(data.OracleOffset)),
-	)
-	return call.ToTxCandidate()
-}
-
-func (f *FaultDisputeGameContract) addGlobalDataTx(ctx context.Context, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
-	vm, err := f.vm(ctx)
-	if err != nil {
-		return txmgr.TxCandidate{}, err
-	}
-	oracle, err := vm.Oracle(ctx)
-	if err != nil {
-		return txmgr.TxCandidate{}, err
-	}
-	return oracle.AddGlobalDataTx(data)
-}
-
 func (f *FaultDisputeGameContract) decodeClaim(result *batching.CallResult, contractIndex int) types.Claim {
 	parentIndex := result.GetUint32(0)
-	countered := result.GetBool(1)
-	claim := result.GetHash(2)
-	position := result.GetBigInt(3)
-	clock := result.GetBigInt(4)
+	counteredBy := result.GetAddress(1)
+	claimant := result.GetAddress(2)
+	bond := result.GetBigInt(3)
+	claim := result.GetHash(4)
+	position := result.GetBigInt(5)
+	clock := result.GetBigInt(6)
 	return types.Claim{
 		ClaimData: types.ClaimData{
 			Value:    claim,
 			Position: types.NewPositionFromGIndex(position),
+			Bond:     bond,
 		},
-		Countered:           countered,
+		CounteredBy:         counteredBy,
+		Claimant:            claimant,
 		Clock:               clock.Uint64(),
 		ContractIndex:       contractIndex,
 		ParentContractIndex: int(parentIndex),

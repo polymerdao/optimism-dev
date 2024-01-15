@@ -7,20 +7,21 @@ import (
 	"math"
 	"time"
 
-	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/flags"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 type Config struct {
-	L1     L1EndpointSetup
-	L2     L2EndpointSetup
-	L2Sync L2SyncEndpointSetup
+	L1 L1EndpointSetup
+	L2 L2EndpointSetup
+
+	Beacon L1BeaconEndpointSetup
 
 	Driver driver.Config
 
@@ -48,7 +49,8 @@ type Config struct {
 	// Runtime config changes should be picked up from log-events,
 	// but if log-events are not coming in (e.g. not syncing blocks) then the reload ensures the config stays accurate.
 	RuntimeConfigReloadInterval time.Duration
-	DAConfig                    da.DAConfig
+
+	DA eigenda.Config
 
 	// Optional
 	Tracer    Tracer
@@ -121,11 +123,18 @@ func (cfg *Config) LoadPersisted(log log.Logger) error {
 
 // Check verifies that the given configuration makes sense
 func (cfg *Config) Check() error {
+	if err := cfg.L1.Check(); err != nil {
+		return fmt.Errorf("l2 endpoint config error: %w", err)
+	}
 	if err := cfg.L2.Check(); err != nil {
 		return fmt.Errorf("l2 endpoint config error: %w", err)
 	}
-	if err := cfg.L2Sync.Check(); err != nil {
-		return fmt.Errorf("sync config error: %w", err)
+	if cfg.Beacon != nil {
+		if err := cfg.Beacon.Check(); err != nil {
+			return fmt.Errorf("beacon endpoint config error: %w", err)
+		}
+	} else if cfg.Rollup.EcotoneTime != nil {
+		return fmt.Errorf("ecotone upgrade scheduled but no beacon endpoint is configured")
 	}
 	if err := cfg.Rollup.Check(); err != nil {
 		return fmt.Errorf("rollup config error: %w", err)

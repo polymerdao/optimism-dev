@@ -63,7 +63,7 @@ The program uses the pre-image oracle to query any input data that is understood
 - External data not already part of the program code. See [Pre-image hinting routes](#pre-image-hinting-routes).
 
 The communication happens over a simple request-response wire protocol,
-see [Pre-image communcation](#pre-image-communication).
+see [Pre-image communication](#pre-image-communication).
 
 ### Pre-image key types
 
@@ -184,7 +184,7 @@ Hinting is implemented with a request-acknowledgement wire-protocol over a block
 ```text
 <request> := <length prefix> <hint bytes>
 
-<repsonse> := <ack>
+<response> := <ack>
 
 <length prefix> := big-endian uint32  # length of <hint bytes>
 <hint bytes> := byte sequence
@@ -409,7 +409,8 @@ Fault Proof VMs:
 [Interactive Dispute Game]: #Fault-Proof-Interactive-Dispute-Game
 
 The interactive dispute game allows actors to resolve a dispute with an onchain challenge-response game
-that bisects the execution trace of the VM, bounded with a base-case that proves a VM trace step.
+that bisects to a disagreed block $n \rarrow n + 1$ state transition, and then over the execution trace of the VM which
+models this state transition, bounded with a base-case that proves a single VM trace step.
 
 The game is multi-player: different non-aligned actors may participate when bonded.
 

@@ -3,30 +3,29 @@ package opnode
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum-optimism/optimism/op-node/chaincfg"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
-	"github.com/urfave/cli/v2"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/urfave/cli/v2"
 
-	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/flags"
 	"github.com/ethereum-optimism/optimism/op-node/node"
 	p2pcli "github.com/ethereum-optimism/optimism/op-node/p2p/cli"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
+	opflags "github.com/ethereum-optimism/optimism/op-service/flags"
 )
 
 // NewConfig creates a Config from the provided flags or environment variables.
@@ -66,16 +65,17 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		return nil, fmt.Errorf("failed to load l2 endpoints info: %w", err)
 	}
 
-	l2SyncEndpoint := NewL2SyncEndpointConfig(ctx)
-
-	syncConfig := NewSyncConfig(ctx)
+	syncConfig, err := NewSyncConfig(ctx, log)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create the sync config: %w", err)
+	}
 
 	haltOption := ctx.String(flags.RollupHalt.Name)
 	if haltOption == "none" {
 		haltOption = ""
 	}
 
-	daCfg, err := NewDAConfig(ctx)
+	daCfg, err := NewEigenDAConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load da config: %w", err)
 	}
@@ -83,7 +83,6 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 	cfg := &node.Config{
 		L1:     l1Endpoint,
 		L2:     l2Endpoint,
-		L2Sync: l2SyncEndpoint,
 		Rollup: *rollupConfig,
 		Driver: *driverConfig,
 		RPC: node.RPCConfig{
@@ -96,11 +95,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 			ListenAddr: ctx.String(flags.MetricsAddrFlag.Name),
 			ListenPort: ctx.Int(flags.MetricsPortFlag.Name),
 		},
-		Pprof: oppprof.CLIConfig{
-			Enabled:    ctx.Bool(flags.PprofEnabledFlag.Name),
-			ListenAddr: ctx.String(flags.PprofAddrFlag.Name),
-			ListenPort: ctx.Int(flags.PprofPortFlag.Name),
-		},
+		Pprof:                       oppprof.ReadCLIConfig(ctx),
 		P2P:                         p2pConfig,
 		P2PSigner:                   p2pSignerSetup,
 		L1EpochPollInterval:         ctx.Duration(flags.L1EpochPollIntervalFlag.Name),
@@ -114,7 +109,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		Sync:              *syncConfig,
 		RollupHalt:        haltOption,
 		RethDBPath:        ctx.String(flags.L1RethDBPath.Name),
-		DAConfig:          daCfg,
+		DA:                daCfg,
 	}
 
 	if err := cfg.LoadPersisted(log); err != nil {
@@ -135,6 +130,7 @@ func NewL1EndpointConfig(ctx *cli.Context) *node.L1EndpointConfig {
 		RateLimit:        ctx.Float64(flags.L1RPCRateLimit.Name),
 		BatchSize:        ctx.Int(flags.L1RPCMaxBatchSize.Name),
 		HttpPollInterval: ctx.Duration(flags.L1HTTPPollInterval.Name),
+		MaxConcurrency:   ctx.Int(flags.L1RPCMaxConcurrency.Name),
 	}
 }
 
@@ -157,7 +153,7 @@ func NewL2EndpointConfig(ctx *cli.Context, log log.Logger) (*node.L2EndpointConf
 		if _, err := io.ReadFull(rand.Reader, secret[:]); err != nil {
 			return nil, fmt.Errorf("failed to generate jwt secret: %w", err)
 		}
-		if err := os.WriteFile(fileName, []byte(hexutil.Encode(secret[:])), 0600); err != nil {
+		if err := os.WriteFile(fileName, []byte(hexutil.Encode(secret[:])), 0o600); err != nil {
 			return nil, err
 		}
 	}
@@ -166,15 +162,6 @@ func NewL2EndpointConfig(ctx *cli.Context, log log.Logger) (*node.L2EndpointConf
 		L2EngineAddr:      l2Addr,
 		L2EngineJWTSecret: secret,
 	}, nil
-}
-
-// NewL2SyncEndpointConfig returns a pointer to a L2SyncEndpointConfig if the
-// flag is set, otherwise nil.
-func NewL2SyncEndpointConfig(ctx *cli.Context) *node.L2SyncEndpointConfig {
-	return &node.L2SyncEndpointConfig{
-		L2NodeAddr: ctx.String(flags.BackupL2UnsafeSyncRPC.Name),
-		TrustRPC:   ctx.Bool(flags.BackupL2UnsafeSyncRPCTrustRPC.Name),
-	}
 }
 
 func NewConfigPersistence(ctx *cli.Context) node.ConfigPersistence {
@@ -196,8 +183,8 @@ func NewDriverConfig(ctx *cli.Context) *driver.Config {
 }
 
 func NewRollupConfig(log log.Logger, ctx *cli.Context) (*rollup.Config, error) {
-	network := ctx.String(flags.Network.Name)
-	rollupConfigPath := ctx.String(flags.RollupConfig.Name)
+	network := ctx.String(opflags.NetworkFlagName)
+	rollupConfigPath := ctx.String(opflags.RollupConfigFlagName)
 	if ctx.Bool(flags.BetaExtraNetworks.Name) {
 		log.Warn("The beta.extra-networks flag is deprecated and can be omitted safely.")
 	}
@@ -208,16 +195,12 @@ Startup will proceed to use the network-parameter and ignore the rollup config.
 Conflicting configuration is deprecated, and will stop the op-node from starting in the future.
 `, "network", network, "rollup_config", rollupConfigPath)
 		}
-		config, err := chaincfg.GetRollupConfig(network)
+		rollupConfig, err := chaincfg.GetRollupConfig(network)
 		if err != nil {
 			return nil, err
 		}
-		if ctx.IsSet(flags.CanyonOverrideFlag.Name) {
-			canyon := ctx.Uint64(flags.CanyonOverrideFlag.Name)
-			config.CanyonTime = &canyon
-		}
-
-		return config, nil
+		applyOverrides(ctx, rollupConfig)
+		return rollupConfig, nil
 	}
 
 	file, err := os.Open(rollupConfigPath)
@@ -230,11 +213,19 @@ Conflicting configuration is deprecated, and will stop the op-node from starting
 	if err := json.NewDecoder(file).Decode(&rollupConfig); err != nil {
 		return nil, fmt.Errorf("failed to decode rollup config: %w", err)
 	}
-	if ctx.IsSet(flags.CanyonOverrideFlag.Name) {
-		canyon := ctx.Uint64(flags.CanyonOverrideFlag.Name)
+	applyOverrides(ctx, &rollupConfig)
+	return &rollupConfig, nil
+}
+
+func applyOverrides(ctx *cli.Context, rollupConfig *rollup.Config) {
+	if ctx.IsSet(opflags.CanyonOverrideFlagName) {
+		canyon := ctx.Uint64(opflags.CanyonOverrideFlagName)
 		rollupConfig.CanyonTime = &canyon
 	}
-	return &rollupConfig, nil
+	if ctx.IsSet(opflags.DeltaOverrideFlagName) {
+		delta := ctx.Uint64(opflags.DeltaOverrideFlagName)
+		rollupConfig.DeltaTime = &delta
+	}
 }
 
 func NewSnapshotLogger(ctx *cli.Context) (log.Logger, error) {
@@ -253,23 +244,31 @@ func NewSnapshotLogger(ctx *cli.Context) (log.Logger, error) {
 	return logger, nil
 }
 
-func NewSyncConfig(ctx *cli.Context) *sync.Config {
-	return &sync.Config{
-		EngineSync:         ctx.Bool(flags.L2EngineSyncEnabled.Name),
+func NewSyncConfig(ctx *cli.Context, log log.Logger) (*sync.Config, error) {
+	if ctx.IsSet(flags.L2EngineSyncEnabled.Name) && ctx.IsSet(flags.SyncModeFlag.Name) {
+		return nil, errors.New("cannot set both --l2.engine-sync and --syncmode at the same time.")
+	} else if ctx.IsSet(flags.L2EngineSyncEnabled.Name) {
+		log.Error("l2.engine-sync is deprecated and will be removed in a future release. Use --syncmode=execution-layer instead.")
+	}
+	mode, err := sync.StringToMode(ctx.String(flags.SyncModeFlag.Name))
+	if err != nil {
+		return nil, err
+	}
+	cfg := &sync.Config{
+		SyncMode:           mode,
 		SkipSyncStartCheck: ctx.Bool(flags.SkipSyncStartCheck.Name),
 	}
+	if ctx.Bool(flags.L2EngineSyncEnabled.Name) {
+		cfg.SyncMode = sync.ELSync
+	}
+
+	return cfg, nil
 }
 
-func NewDAConfig(ctx *cli.Context) (da.DAConfig, error) {
-	rpc := ctx.String(flags.DaRPC.Name)
-	conn, err := grpc.Dial(rpc, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return da.DAConfig{}, err
-	}
-	client := disperser.NewDisperserClient(conn)
-
-	return da.DAConfig{
-		Rpc:    rpc,
-		Client: client,
+func NewEigenDAConfig(ctx *cli.Context) (eigenda.Config, error) {
+	rpc := ctx.String(flags.DARPC.Name)
+	return eigenda.Config{
+		RPC: rpc,
+		// Can leave everything else unfilled for the node
 	}, nil
 }

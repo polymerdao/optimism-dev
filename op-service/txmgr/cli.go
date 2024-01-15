@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"time"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	opservice "github.com/ethereum-optimism/optimism/op-service"
 	opcrypto "github.com/ethereum-optimism/optimism/op-service/crypto"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	opsigner "github.com/ethereum-optimism/optimism/op-service/signer"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -26,20 +25,17 @@ const (
 	HDPathFlagName     = "hd-path"
 	PrivateKeyFlagName = "private-key"
 	// TxMgr Flags (new + legacy + some shared flags)
-	NumConfirmationsFlagName            = "num-confirmations"
-	SafeAbortNonceTooLowCountFlagName   = "safe-abort-nonce-too-low-count"
-	FeeLimitMultiplierFlagName          = "fee-limit-multiplier"
-	ResubmissionTimeoutFlagName         = "resubmission-timeout"
-	NetworkTimeoutFlagName              = "network-timeout"
-	TxSendTimeoutFlagName               = "txmgr.send-timeout"
-	TxNotInMempoolTimeoutFlagName       = "txmgr.not-in-mempool-timeout"
-	ReceiptQueryIntervalFlagName        = "txmgr.receipt-query-interval"
-	DARpcFlagName                       = "da-rpc"
-	DAPrimaryQuorumIDFlagName           = "da-primary-quorum-id"
-	DAPrimaryAdversaryThresholdFlagName = "da-primary-adversary-threshold"
-	DAPrimaryQuorumThresholdFlagName    = "da-primary-quorum-threshold"
-	DAStatusQueryRetryIntervalFlagName  = "da-status-query-retry-interval"
-	DAStatusQueryTimeoutFlagName        = "da-status-query-timeout"
+	NumConfirmationsFlagName          = "num-confirmations"
+	SafeAbortNonceTooLowCountFlagName = "safe-abort-nonce-too-low-count"
+	FeeLimitMultiplierFlagName        = "fee-limit-multiplier"
+	FeeLimitThresholdFlagName         = "txmgr.fee-limit-threshold"
+	MinBasefeeFlagName                = "txmgr.min-basefee"
+	MinTipCapFlagName                 = "txmgr.min-tip-cap"
+	ResubmissionTimeoutFlagName       = "resubmission-timeout"
+	NetworkTimeoutFlagName            = "network-timeout"
+	TxSendTimeoutFlagName             = "txmgr.send-timeout"
+	TxNotInMempoolTimeoutFlagName     = "txmgr.not-in-mempool-timeout"
+	ReceiptQueryIntervalFlagName      = "txmgr.receipt-query-interval"
 )
 
 var (
@@ -61,6 +57,7 @@ type DefaultFlagValues struct {
 	NumConfirmations          uint64
 	SafeAbortNonceTooLowCount uint64
 	FeeLimitMultiplier        uint64
+	FeeLimitThresholdGwei     float64
 	ResubmissionTimeout       time.Duration
 	NetworkTimeout            time.Duration
 	TxSendTimeout             time.Duration
@@ -73,6 +70,7 @@ var (
 		NumConfirmations:          uint64(10),
 		SafeAbortNonceTooLowCount: uint64(3),
 		FeeLimitMultiplier:        uint64(5),
+		FeeLimitThresholdGwei:     100.0,
 		ResubmissionTimeout:       48 * time.Second,
 		NetworkTimeout:            10 * time.Second,
 		TxSendTimeout:             0 * time.Second,
@@ -83,6 +81,7 @@ var (
 		NumConfirmations:          uint64(3),
 		SafeAbortNonceTooLowCount: uint64(3),
 		FeeLimitMultiplier:        uint64(5),
+		FeeLimitThresholdGwei:     100.0,
 		ResubmissionTimeout:       24 * time.Second,
 		NetworkTimeout:            10 * time.Second,
 		TxSendTimeout:             2 * time.Minute,
@@ -133,6 +132,22 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			Value:   defaults.FeeLimitMultiplier,
 			EnvVars: prefixEnvVars("TXMGR_FEE_LIMIT_MULTIPLIER"),
 		},
+		&cli.Float64Flag{
+			Name:    FeeLimitThresholdFlagName,
+			Usage:   "The minimum threshold (in GWei) at which fee bumping starts to be capped. Allows arbitrary fee bumps below this threshold.",
+			Value:   defaults.FeeLimitThresholdGwei,
+			EnvVars: prefixEnvVars("TXMGR_FEE_LIMIT_THRESHOLD"),
+		},
+		&cli.Float64Flag{
+			Name:    MinBasefeeFlagName,
+			Usage:   "Enforces a minimum basefee (in GWei) to assume when determining tx fees. Off by default.",
+			EnvVars: prefixEnvVars("TXMGR_MIN_BASEFEE"),
+		},
+		&cli.Float64Flag{
+			Name:    MinTipCapFlagName,
+			Usage:   "Enforces a minimum tip cap (in GWei) to use when determining tx fees. Off by default.",
+			EnvVars: prefixEnvVars("TXMGR_MIN_TIP_CAP"),
+		},
 		&cli.DurationFlag{
 			Name:    ResubmissionTimeoutFlagName,
 			Usage:   "Duration we will wait before resubmitting a transaction to L1",
@@ -163,63 +178,28 @@ func CLIFlagsWithDefaults(envPrefix string, defaults DefaultFlagValues) []cli.Fl
 			Value:   defaults.ReceiptQueryInterval,
 			EnvVars: prefixEnvVars("TXMGR_RECEIPT_QUERY_INTERVAL"),
 		},
-		&cli.StringFlag{
-			Name:    DARpcFlagName,
-			Usage:   "RPC endpoint of the EigenDA disperser",
-			EnvVars: prefixEnvVars("DA_RPC"),
-		},
-		&cli.Uint64Flag{
-			Name:    DAPrimaryAdversaryThresholdFlagName,
-			Usage:   "Adversary threshold for the primary quorum of the DA layer",
-			EnvVars: prefixEnvVars("DA_PRIMARY_ADVERSARY_THRESHOLD"),
-		},
-		&cli.Uint64Flag{
-			Name:    DAPrimaryQuorumThresholdFlagName,
-			Usage:   "Quorum threshold for the primary quorum of the DA layer",
-			EnvVars: prefixEnvVars("DA_PRIMARY_QUORUM_THRESHOLD"),
-		},
-		&cli.Uint64Flag{
-			Name:    DAPrimaryQuorumIDFlagName,
-			Usage:   "Secondary Quorum ID of the DA layer",
-			EnvVars: prefixEnvVars("DA_PRIMARY_QUORUM_ID"),
-		},
-		&cli.DurationFlag{
-			Name:    DAStatusQueryTimeoutFlagName,
-			Usage:   "Timeout for aborting an EigenDA blob dispersal if the disperser does not report that the blob has been confirmed dispersed.",
-			Value:   1 * time.Minute,
-			EnvVars: prefixEnvVars("DA_STATUS_QUERY_TIMEOUT"),
-		},
-		&cli.DurationFlag{
-			Name:    DAStatusQueryRetryIntervalFlagName,
-			Usage:   "Wait time between retries of EigenDA blob status queries (made while waiting for a blob to be confirmed by)",
-			Value:   5 * time.Second,
-			EnvVars: prefixEnvVars("DA_STATUS_QUERY_INTERVAL"),
-		},
 	}, opsigner.CLIFlags(envPrefix)...)
 }
 
 type CLIConfig struct {
-	L1RPCURL                    string
-	Mnemonic                    string
-	HDPath                      string
-	SequencerHDPath             string
-	L2OutputHDPath              string
-	PrivateKey                  string
-	SignerCLIConfig             opsigner.CLIConfig
-	NumConfirmations            uint64
-	SafeAbortNonceTooLowCount   uint64
-	FeeLimitMultiplier          uint64
-	ResubmissionTimeout         time.Duration
-	ReceiptQueryInterval        time.Duration
-	NetworkTimeout              time.Duration
-	TxSendTimeout               time.Duration
-	TxNotInMempoolTimeout       time.Duration
-	DARpc                       string
-	DAPrimaryQuorumID           uint32
-	DAPrimaryAdversaryThreshold uint32
-	DAPrimaryQuorumThreshold    uint32
-	DAStatusQueryRetryInterval  time.Duration
-	DAStatusQueryTimeout        time.Duration
+	L1RPCURL                  string
+	Mnemonic                  string
+	HDPath                    string
+	SequencerHDPath           string
+	L2OutputHDPath            string
+	PrivateKey                string
+	SignerCLIConfig           opsigner.CLIConfig
+	NumConfirmations          uint64
+	SafeAbortNonceTooLowCount uint64
+	FeeLimitMultiplier        uint64
+	FeeLimitThresholdGwei     float64
+	MinBasefeeGwei            float64
+	MinTipCapGwei             float64
+	ResubmissionTimeout       time.Duration
+	ReceiptQueryInterval      time.Duration
+	NetworkTimeout            time.Duration
+	TxSendTimeout             time.Duration
+	TxNotInMempoolTimeout     time.Duration
 }
 
 func NewCLIConfig(l1RPCURL string, defaults DefaultFlagValues) CLIConfig {
@@ -228,6 +208,7 @@ func NewCLIConfig(l1RPCURL string, defaults DefaultFlagValues) CLIConfig {
 		NumConfirmations:          defaults.NumConfirmations,
 		SafeAbortNonceTooLowCount: defaults.SafeAbortNonceTooLowCount,
 		FeeLimitMultiplier:        defaults.FeeLimitMultiplier,
+		FeeLimitThresholdGwei:     defaults.FeeLimitThresholdGwei,
 		ResubmissionTimeout:       defaults.ResubmissionTimeout,
 		NetworkTimeout:            defaults.NetworkTimeout,
 		TxSendTimeout:             defaults.TxSendTimeout,
@@ -250,6 +231,10 @@ func (m CLIConfig) Check() error {
 	if m.FeeLimitMultiplier == 0 {
 		return errors.New("must provide FeeLimitMultiplier")
 	}
+	if m.MinBasefeeGwei < m.MinTipCapGwei {
+		return fmt.Errorf("minBasefee smaller than minTipCap, have %f < %f",
+			m.MinBasefeeGwei, m.MinTipCapGwei)
+	}
 	if m.ResubmissionTimeout == 0 {
 		return errors.New("must provide ResubmissionTimeout")
 	}
@@ -262,21 +247,6 @@ func (m CLIConfig) Check() error {
 	if m.SafeAbortNonceTooLowCount == 0 {
 		return errors.New("SafeAbortNonceTooLowCount must not be 0")
 	}
-	if m.DARpc == "" {
-		return errors.New("must provide a DA RPC url")
-	}
-	if m.DAPrimaryAdversaryThreshold == 0 || m.DAPrimaryAdversaryThreshold >= 100 {
-		return errors.New("must provide a valid primary DA adversary threshold between (0 and 100)")
-	}
-	if m.DAPrimaryQuorumThreshold == 0 || m.DAPrimaryQuorumThreshold >= 100 {
-		return errors.New("must provide a valid primary DA quorum threshold between (0 and 100)")
-	}
-	if m.DAStatusQueryTimeout == 0 {
-		return errors.New("DA status query timeout must be greater than 0")
-	}
-	if m.DAStatusQueryRetryInterval == 0 {
-		return errors.New("DA status query retry interval must be greater than 0")
-	}
 	if err := m.SignerCLIConfig.Check(); err != nil {
 		return err
 	}
@@ -285,27 +255,24 @@ func (m CLIConfig) Check() error {
 
 func ReadCLIConfig(ctx *cli.Context) CLIConfig {
 	return CLIConfig{
-		L1RPCURL:                    ctx.String(L1RPCFlagName),
-		Mnemonic:                    ctx.String(MnemonicFlagName),
-		HDPath:                      ctx.String(HDPathFlagName),
-		SequencerHDPath:             ctx.String(SequencerHDPathFlag.Name),
-		L2OutputHDPath:              ctx.String(L2OutputHDPathFlag.Name),
-		PrivateKey:                  ctx.String(PrivateKeyFlagName),
-		SignerCLIConfig:             opsigner.ReadCLIConfig(ctx),
-		NumConfirmations:            ctx.Uint64(NumConfirmationsFlagName),
-		SafeAbortNonceTooLowCount:   ctx.Uint64(SafeAbortNonceTooLowCountFlagName),
-		FeeLimitMultiplier:          ctx.Uint64(FeeLimitMultiplierFlagName),
-		ResubmissionTimeout:         ctx.Duration(ResubmissionTimeoutFlagName),
-		ReceiptQueryInterval:        ctx.Duration(ReceiptQueryIntervalFlagName),
-		NetworkTimeout:              ctx.Duration(NetworkTimeoutFlagName),
-		TxSendTimeout:               ctx.Duration(TxSendTimeoutFlagName),
-		TxNotInMempoolTimeout:       ctx.Duration(TxNotInMempoolTimeoutFlagName),
-		DARpc:                       ctx.String(DARpcFlagName),
-		DAPrimaryQuorumID:           Uint32(ctx, DAPrimaryQuorumIDFlagName),
-		DAPrimaryAdversaryThreshold: Uint32(ctx, DAPrimaryAdversaryThresholdFlagName),
-		DAPrimaryQuorumThreshold:    Uint32(ctx, DAPrimaryQuorumThresholdFlagName),
-		DAStatusQueryRetryInterval:  ctx.Duration(DAStatusQueryRetryIntervalFlagName),
-		DAStatusQueryTimeout:        ctx.Duration(DAStatusQueryTimeoutFlagName),
+		L1RPCURL:                  ctx.String(L1RPCFlagName),
+		Mnemonic:                  ctx.String(MnemonicFlagName),
+		HDPath:                    ctx.String(HDPathFlagName),
+		SequencerHDPath:           ctx.String(SequencerHDPathFlag.Name),
+		L2OutputHDPath:            ctx.String(L2OutputHDPathFlag.Name),
+		PrivateKey:                ctx.String(PrivateKeyFlagName),
+		SignerCLIConfig:           opsigner.ReadCLIConfig(ctx),
+		NumConfirmations:          ctx.Uint64(NumConfirmationsFlagName),
+		SafeAbortNonceTooLowCount: ctx.Uint64(SafeAbortNonceTooLowCountFlagName),
+		FeeLimitMultiplier:        ctx.Uint64(FeeLimitMultiplierFlagName),
+		FeeLimitThresholdGwei:     ctx.Float64(FeeLimitThresholdFlagName),
+		MinBasefeeGwei:            ctx.Float64(MinBasefeeFlagName),
+		MinTipCapGwei:             ctx.Float64(MinTipCapFlagName),
+		ResubmissionTimeout:       ctx.Duration(ResubmissionTimeoutFlagName),
+		ReceiptQueryInterval:      ctx.Duration(ReceiptQueryIntervalFlagName),
+		NetworkTimeout:            ctx.Duration(NetworkTimeoutFlagName),
+		TxSendTimeout:             ctx.Duration(TxSendTimeoutFlagName),
+		TxNotInMempoolTimeout:     ctx.Duration(TxNotInMempoolTimeoutFlagName),
 	}
 }
 
@@ -341,30 +308,37 @@ func NewConfig(cfg CLIConfig, l log.Logger) (Config, error) {
 		return Config{}, fmt.Errorf("could not init signer: %w", err)
 	}
 
-	disperserSecurityParams := []*disperser.SecurityParams{}
-	disperserSecurityParams = append(disperserSecurityParams, &disperser.SecurityParams{
-		QuorumId:           cfg.DAPrimaryQuorumID,
-		AdversaryThreshold: cfg.DAPrimaryAdversaryThreshold,
-		QuorumThreshold:    cfg.DAPrimaryQuorumThreshold,
-	})
+	feeLimitThreshold, err := eth.GweiToWei(cfg.FeeLimitThresholdGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid fee limit threshold: %w", err)
+	}
+
+	minBasefee, err := eth.GweiToWei(cfg.MinBasefeeGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid min basefee: %w", err)
+	}
+
+	minTipCap, err := eth.GweiToWei(cfg.MinTipCapGwei)
+	if err != nil {
+		return Config{}, fmt.Errorf("invalid min tip cap: %w", err)
+	}
 
 	return Config{
-		Backend:                    l1,
-		ResubmissionTimeout:        cfg.ResubmissionTimeout,
-		FeeLimitMultiplier:         cfg.FeeLimitMultiplier,
-		ChainID:                    chainID,
-		TxSendTimeout:              cfg.TxSendTimeout,
-		TxNotInMempoolTimeout:      cfg.TxNotInMempoolTimeout,
-		NetworkTimeout:             cfg.NetworkTimeout,
-		ReceiptQueryInterval:       cfg.ReceiptQueryInterval,
-		NumConfirmations:           cfg.NumConfirmations,
-		SafeAbortNonceTooLowCount:  cfg.SafeAbortNonceTooLowCount,
-		Signer:                     signerFactory(chainID),
-		From:                       from,
-		DARpc:                      cfg.DARpc,
-		DADisperserSecurityParams:  disperserSecurityParams,
-		DAStatusQueryTimeout:       cfg.DAStatusQueryTimeout,
-		DAStatusQueryRetryInterval: cfg.DAStatusQueryRetryInterval,
+		Backend:                   l1,
+		ResubmissionTimeout:       cfg.ResubmissionTimeout,
+		FeeLimitMultiplier:        cfg.FeeLimitMultiplier,
+		FeeLimitThreshold:         feeLimitThreshold,
+		MinBasefee:                minBasefee,
+		MinTipCap:                 minTipCap,
+		ChainID:                   chainID,
+		TxSendTimeout:             cfg.TxSendTimeout,
+		TxNotInMempoolTimeout:     cfg.TxNotInMempoolTimeout,
+		NetworkTimeout:            cfg.NetworkTimeout,
+		ReceiptQueryInterval:      cfg.ReceiptQueryInterval,
+		NumConfirmations:          cfg.NumConfirmations,
+		SafeAbortNonceTooLowCount: cfg.SafeAbortNonceTooLowCount,
+		Signer:                    signerFactory(chainID),
+		From:                      from,
 	}, nil
 }
 
@@ -379,6 +353,17 @@ type Config struct {
 
 	// The multiplier applied to fee suggestions to put a hard limit on fee increases.
 	FeeLimitMultiplier uint64
+
+	// Minimum threshold (in Wei) at which the FeeLimitMultiplier takes effect.
+	// On low-fee networks, like test networks, this allows for arbitrary fee bumps
+	// below this threshold.
+	FeeLimitThreshold *big.Int
+
+	// Minimum basefee (in Wei) to assume when determining tx fees.
+	MinBasefee *big.Int
+
+	// Minimum tip cap (in Wei) to enforce when determining tx fees.
+	MinTipCap *big.Int
 
 	// ChainID is the chain ID of the L1 chain.
 	ChainID *big.Int
@@ -412,40 +397,6 @@ type Config struct {
 	// Signer is used to sign transactions when the gas price is increased.
 	Signer opcrypto.SignerFn
 	From   common.Address
-
-	// Eigenlayer Config
-
-	// TODO(eigenlayer): Update quorum ID command-line parameters to support passing
-	// and arbitrary number of quorum IDs.
-
-	// DaRpc is the HTTP provider URL for the Data Availability node.
-	DARpc string
-
-	// Quorum IDs and SecurityParams to use when dispersing and retrieving blobs
-	DADisperserSecurityParams []*disperser.SecurityParams
-
-	// The total amount of time that the batcher will spend waiting for EigenDA to confirm a blob
-	DAStatusQueryTimeout time.Duration
-
-	// The amount of time to wait between status queries of a newly dispersed blob
-	DAStatusQueryRetryInterval time.Duration
-}
-
-func SafeConvertUInt64ToUInt32(val uint64) (uint32, bool) {
-	if val <= math.MaxUint32 {
-		return uint32(val), true
-	}
-	return 0, false
-}
-
-// We add this because the urfave/cli library doesn't support uint32 specifically
-func Uint32(ctx *cli.Context, flagName string) uint32 {
-	daQuorumIDLong := ctx.Uint64(flagName)
-	daQuorumID, success := SafeConvertUInt64ToUInt32(daQuorumIDLong)
-	if !success {
-		panic(fmt.Errorf("%s must be in the uint32 range", flagName))
-	}
-	return daQuorumID
 }
 
 func (m Config) Check() error {
@@ -460,6 +411,10 @@ func (m Config) Check() error {
 	}
 	if m.FeeLimitMultiplier == 0 {
 		return errors.New("must provide FeeLimitMultiplier")
+	}
+	if m.MinBasefee != nil && m.MinTipCap != nil && m.MinBasefee.Cmp(m.MinTipCap) == -1 {
+		return fmt.Errorf("minBasefee smaller than minTipCap, have %v < %v",
+			m.MinBasefee, m.MinTipCap)
 	}
 	if m.ResubmissionTimeout == 0 {
 		return errors.New("must provide ResubmissionTimeout")

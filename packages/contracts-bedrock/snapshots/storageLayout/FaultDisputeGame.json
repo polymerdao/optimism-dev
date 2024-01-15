@@ -1,65 +1,72 @@
 [
   {
     "bytes": "8",
-    "label": "Timestamp",
+    "label": "createdAt",
     "offset": 0,
     "slot": "0",
-    "type": "t_userDefinedValueType(Timestamp)77431"
+    "type": "Timestamp"
   },
   {
-    "bytes": "1",
-    "label": "enum GameStatus",
+    "bytes": "8",
+    "label": "resolvedAt",
     "offset": 8,
     "slot": "0",
-    "type": "t_enum(GameStatus)77447"
-  },
-  {
-    "bytes": "20",
-    "label": "contract IBondManager",
-    "offset": 9,
-    "slot": "0",
-    "type": "t_contract(IBondManager)75133"
-  },
-  {
-    "bytes": "32",
-    "label": "Hash",
-    "offset": 0,
-    "slot": "1",
-    "type": "t_userDefinedValueType(Hash)77423"
-  },
-  {
-    "bytes": "32",
-    "label": "struct IFaultDisputeGame.ClaimData[]",
-    "offset": 0,
-    "slot": "2",
-    "type": "t_array(t_struct(ClaimData)75347_storage)dyn_storage"
-  },
-  {
-    "bytes": "128",
-    "label": "struct IFaultDisputeGame.OutputProposals",
-    "offset": 0,
-    "slot": "3",
-    "type": "t_struct(OutputProposals)75362_storage"
-  },
-  {
-    "bytes": "32",
-    "label": "mapping(ClaimHash => bool)",
-    "offset": 0,
-    "slot": "7",
-    "type": "t_mapping(t_userDefinedValueType(ClaimHash)77427,t_bool)"
-  },
-  {
-    "bytes": "32",
-    "label": "mapping(uint256 => uint256[])",
-    "offset": 0,
-    "slot": "8",
-    "type": "t_mapping(t_uint256,t_array(t_uint256)dyn_storage)"
+    "type": "Timestamp"
   },
   {
     "bytes": "1",
-    "label": "bool",
+    "label": "status",
+    "offset": 16,
+    "slot": "0",
+    "type": "enum GameStatus"
+  },
+  {
+    "bytes": "32",
+    "label": "l1Head",
     "offset": 0,
-    "slot": "9",
-    "type": "t_bool"
+    "slot": "1",
+    "type": "Hash"
+  },
+  {
+    "bytes": "32",
+    "label": "claimData",
+    "offset": 0,
+    "slot": "2",
+    "type": "struct IFaultDisputeGame.ClaimData[]"
+  },
+  {
+    "bytes": "32",
+    "label": "credit",
+    "offset": 0,
+    "slot": "3",
+    "type": "mapping(address => uint256)"
+  },
+  {
+    "bytes": "32",
+    "label": "claims",
+    "offset": 0,
+    "slot": "4",
+    "type": "mapping(ClaimHash => bool)"
+  },
+  {
+    "bytes": "32",
+    "label": "subgames",
+    "offset": 0,
+    "slot": "5",
+    "type": "mapping(uint256 => uint256[])"
+  },
+  {
+    "bytes": "1",
+    "label": "subgameAtRootResolved",
+    "offset": 0,
+    "slot": "6",
+    "type": "bool"
+  },
+  {
+    "bytes": "1",
+    "label": "initialized",
+    "offset": 1,
+    "slot": "6",
+    "type": "bool"
   }
 ]

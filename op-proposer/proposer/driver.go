@@ -13,17 +13,21 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
 	"github.com/ethereum-optimism/optimism/op-proposer/metrics"
+	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
 
-var supportedL2OutputVersion = eth.Bytes32{}
-var ErrProposerNotRunning = errors.New("proposer is not running")
+var (
+	supportedL2OutputVersion = eth.Bytes32{}
+	ErrProposerNotRunning    = errors.New("proposer is not running")
+)
 
 type L1Client interface {
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
@@ -48,8 +52,8 @@ type DriverSetup struct {
 	Txmgr    txmgr.TxManager
 	L1Client L1Client
 
-	// RollupClient is used to retrieve output roots from
-	RollupClient RollupClient
+	// RollupProvider's RollupClient() is used to retrieve output roots from
+	RollupProvider dial.RollupProvider
 }
 
 // L2OutputSubmitter is responsible for proposing outputs
@@ -67,13 +71,34 @@ type L2OutputSubmitter struct {
 
 	l2ooContract *bindings.L2OutputOracleCaller
 	l2ooABI      *abi.ABI
+
+	dgfContract *bindings.DisputeGameFactoryCaller
+	dgfABI      *abi.ABI
 }
 
 // NewL2OutputSubmitter creates a new L2 Output Submitter
-func NewL2OutputSubmitter(setup DriverSetup) (*L2OutputSubmitter, error) {
+func NewL2OutputSubmitter(setup DriverSetup) (_ *L2OutputSubmitter, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
+	// The above context is long-lived, and passed to the `L2OutputSubmitter` instance. This context is closed by
+	// `StopL2OutputSubmitting`, but if this function returns an error or panics, we want to ensure that the context
+	// doesn't leak.
+	defer func() {
+		if err != nil || recover() != nil {
+			cancel()
+		}
+	}()
 
-	l2ooContract, err := bindings.NewL2OutputOracleCaller(setup.Cfg.L2OutputOracleAddr, setup.L1Client)
+	if setup.Cfg.L2OutputOracleAddr != nil {
+		return newL2OOSubmitter(ctx, cancel, setup)
+	} else if setup.Cfg.DisputeGameFactoryAddr != nil {
+		return newDGFSubmitter(ctx, cancel, setup)
+	} else {
+		return nil, errors.New("neither the `L2OutputOracle` nor `DisputeGameFactory` addresses were provided")
+	}
+}
+
+func newL2OOSubmitter(ctx context.Context, cancel context.CancelFunc, setup DriverSetup) (*L2OutputSubmitter, error) {
+	l2ooContract, err := bindings.NewL2OutputOracleCaller(*setup.Cfg.L2OutputOracleAddr, setup.L1Client)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create L2OO at address %s: %w", setup.Cfg.L2OutputOracleAddr, err)
@@ -105,6 +130,39 @@ func NewL2OutputSubmitter(setup DriverSetup) (*L2OutputSubmitter, error) {
 	}, nil
 }
 
+func newDGFSubmitter(ctx context.Context, cancel context.CancelFunc, setup DriverSetup) (*L2OutputSubmitter, error) {
+	dgfCaller, err := bindings.NewDisputeGameFactoryCaller(*setup.Cfg.DisputeGameFactoryAddr, setup.L1Client)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create DGF at address %s: %w", setup.Cfg.DisputeGameFactoryAddr, err)
+	}
+
+	cCtx, cCancel := context.WithTimeout(ctx, setup.Cfg.NetworkTimeout)
+	defer cCancel()
+	version, err := dgfCaller.Version(&bind.CallOpts{Context: cCtx})
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	log.Info("Connected to DisputeGameFactory", "address", setup.Cfg.DisputeGameFactoryAddr, "version", version)
+
+	parsed, err := bindings.DisputeGameFactoryMetaData.GetAbi()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+
+	return &L2OutputSubmitter{
+		DriverSetup: setup,
+		done:        make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
+
+		dgfContract: dgfCaller,
+		dgfABI:      parsed,
+	}, nil
+}
+
 func (l *L2OutputSubmitter) StartL2OutputSubmitting() error {
 	l.Log.Info("Starting Proposer")
 
@@ -112,7 +170,7 @@ func (l *L2OutputSubmitter) StartL2OutputSubmitting() error {
 	defer l.mutex.Unlock()
 
 	if l.running {
-		return errors.New("Proposer is already running")
+		return errors.New("proposer is already running")
 	}
 	l.running = true
 
@@ -153,6 +211,10 @@ func (l *L2OutputSubmitter) StopL2OutputSubmitting() error {
 // FetchNextOutputInfo gets the block number of the next proposal.
 // It returns: the next block number, if the proposal should be made, error
 func (l *L2OutputSubmitter) FetchNextOutputInfo(ctx context.Context) (*eth.OutputResponse, bool, error) {
+	if l.l2ooContract == nil {
+		return nil, false, fmt.Errorf("L2OutputOracle contract not set, cannot fetch next output info")
+	}
+
 	cCtx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
 	defer cancel()
 	callOpts := &bind.CallOpts{
@@ -165,21 +227,11 @@ func (l *L2OutputSubmitter) FetchNextOutputInfo(ctx context.Context) (*eth.Outpu
 		return nil, false, err
 	}
 	// Fetch the current L2 heads
-	cCtx, cancel = context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
-	defer cancel()
-	status, err := l.RollupClient.SyncStatus(cCtx)
+	currentBlockNumber, err := l.FetchCurrentBlockNumber(ctx)
 	if err != nil {
-		l.Log.Error("proposer unable to get sync status", "err", err)
 		return nil, false, err
 	}
 
-	// Use either the finalized or safe head depending on the config. Finalized head is default & safer.
-	var currentBlockNumber *big.Int
-	if l.Cfg.AllowNonFinalized {
-		currentBlockNumber = new(big.Int).SetUint64(status.SafeL2.Number)
-	} else {
-		currentBlockNumber = new(big.Int).SetUint64(status.FinalizedL2.Number)
-	}
 	// Ensure that we do not submit a block in the future
 	if currentBlockNumber.Cmp(nextCheckpointBlock) < 0 {
 		l.Log.Debug("proposer submission interval has not elapsed", "currentBlockNumber", currentBlockNumber, "nextBlockNumber", nextCheckpointBlock)
@@ -189,25 +241,57 @@ func (l *L2OutputSubmitter) FetchNextOutputInfo(ctx context.Context) (*eth.Outpu
 	return l.fetchOutput(ctx, nextCheckpointBlock)
 }
 
+// FetchCurrentBlockNumber gets the current block number from the [L2OutputSubmitter]'s [RollupClient]. If the `AllowNonFinalized` configuration
+// option is set, it will return the safe head block number, and if not, it will return the finalized head block number.
+func (l *L2OutputSubmitter) FetchCurrentBlockNumber(ctx context.Context) (*big.Int, error) {
+	cCtx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
+	defer cancel()
+	rollupClient, err := l.RollupProvider.RollupClient(cCtx)
+	if err != nil {
+		l.Log.Error("proposer unable to get rollup client", "err", err)
+		return nil, err
+	}
+	status, err := rollupClient.SyncStatus(cCtx)
+	if err != nil {
+		l.Log.Error("proposer unable to get sync status", "err", err)
+		return nil, err
+	}
+
+	// Use either the finalized or safe head depending on the config. Finalized head is default & safer.
+	var currentBlockNumber *big.Int
+	if l.Cfg.AllowNonFinalized {
+		currentBlockNumber = new(big.Int).SetUint64(status.SafeL2.Number)
+	} else {
+		currentBlockNumber = new(big.Int).SetUint64(status.FinalizedL2.Number)
+	}
+	return currentBlockNumber, nil
+}
+
 func (l *L2OutputSubmitter) fetchOutput(ctx context.Context, block *big.Int) (*eth.OutputResponse, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, l.Cfg.NetworkTimeout)
 	defer cancel()
-	output, err := l.RollupClient.OutputAtBlock(ctx, block.Uint64())
+
+	rollupClient, err := l.RollupProvider.RollupClient(ctx)
 	if err != nil {
-		l.Log.Error("failed to fetch output at block %d: %w", block, err)
+		l.Log.Error("proposer unable to get rollup client", "err", err)
+		return nil, false, err
+	}
+	output, err := rollupClient.OutputAtBlock(ctx, block.Uint64())
+	if err != nil {
+		l.Log.Error("failed to fetch output at block", "block", block, "err", err)
 		return nil, false, err
 	}
 	if output.Version != supportedL2OutputVersion {
-		l.Log.Error("unsupported l2 output version: %s", output.Version)
+		l.Log.Error("unsupported l2 output version", "output_version", output.Version, "supported_version", supportedL2OutputVersion)
 		return nil, false, errors.New("unsupported l2 output version")
 	}
 	if output.BlockRef.Number != block.Uint64() { // sanity check, e.g. in case of bad RPC caching
-		l.Log.Error("invalid blockNumber: next blockNumber is %v, blockNumber of block is %v", block, output.BlockRef.Number)
+		l.Log.Error("invalid blockNumber", "next_block", block, "output_block", output.BlockRef.Number)
 		return nil, false, errors.New("invalid blockNumber")
 	}
 
 	// Always propose if it's part of the Finalized L2 chain. Or if allowed, if it's part of the safe L2 chain.
-	if !(output.BlockRef.Number <= output.Status.FinalizedL2.Number || (l.Cfg.AllowNonFinalized && output.BlockRef.Number <= output.Status.SafeL2.Number)) {
+	if output.BlockRef.Number > output.Status.FinalizedL2.Number && (!l.Cfg.AllowNonFinalized || output.BlockRef.Number > output.Status.SafeL2.Number) {
 		l.Log.Debug("not proposing yet, L2 block is not ready for proposal",
 			"l2_proposal", output.BlockRef,
 			"l2_safe", output.Status.SafeL2,
@@ -233,6 +317,23 @@ func proposeL2OutputTxData(abi *abi.ABI, output *eth.OutputResponse) ([]byte, er
 		new(big.Int).SetUint64(output.Status.CurrentL1.Number))
 }
 
+func (l *L2OutputSubmitter) ProposeL2OutputDGFTxData(output *eth.OutputResponse) ([]byte, *big.Int, error) {
+	bond, err := l.dgfContract.InitBonds(&bind.CallOpts{}, l.Cfg.DisputeGameType)
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := proposeL2OutputDGFTxData(l.dgfABI, l.Cfg.DisputeGameType, output)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, bond, err
+}
+
+// proposeL2OutputDGFTxData creates the transaction data for the DisputeGameFactory's `create` function
+func proposeL2OutputDGFTxData(abi *abi.ABI, gameType uint8, output *eth.OutputResponse) ([]byte, error) {
+	return abi.Pack("create", gameType, output.OutputRoot, math.U256Bytes(new(big.Int).SetUint64(output.BlockRef.Number)))
+}
+
 // We wait until l1head advances beyond blocknum. This is used to make sure proposal tx won't
 // immediately fail when checking the l1 blockhash. Note that EstimateGas uses "latest" state to
 // execute the transaction by default, meaning inside the call, the head block is considered
@@ -254,7 +355,6 @@ func (l *L2OutputSubmitter) waitForL1Head(ctx context.Context, blockNum uint64) 
 			if err != nil {
 				return err
 			}
-			break
 		case <-l.done:
 			return fmt.Errorf("L2OutputSubmitter is done()")
 		}
@@ -268,18 +368,37 @@ func (l *L2OutputSubmitter) sendTransaction(ctx context.Context, output *eth.Out
 	if err != nil {
 		return err
 	}
-	data, err := l.ProposeL2OutputTxData(output)
-	if err != nil {
-		return err
+
+	var receipt *types.Receipt
+	if l.Cfg.DisputeGameFactoryAddr != nil {
+		data, bond, err := l.ProposeL2OutputDGFTxData(output)
+		if err != nil {
+			return err
+		}
+		receipt, err = l.Txmgr.Send(ctx, txmgr.TxCandidate{
+			TxData:   data,
+			To:       l.Cfg.DisputeGameFactoryAddr,
+			GasLimit: 0,
+			Value:    bond,
+		})
+		if err != nil {
+			return err
+		}
+	} else {
+		data, err := l.ProposeL2OutputTxData(output)
+		if err != nil {
+			return err
+		}
+		receipt, err = l.Txmgr.Send(ctx, txmgr.TxCandidate{
+			TxData:   data,
+			To:       l.Cfg.L2OutputOracleAddr,
+			GasLimit: 0,
+		})
+		if err != nil {
+			return err
+		}
 	}
-	receipt, err := l.Txmgr.Send(ctx, txmgr.TxCandidate{
-		TxData:   data,
-		To:       &l.Cfg.L2OutputOracleAddr,
-		GasLimit: 0,
-	})
-	if err != nil {
-		return err
-	}
+
 	if receipt.Status == types.ReceiptStatusFailed {
 		l.Log.Error("proposer tx successfully published but reverted", "tx_hash", receipt.TxHash)
 	} else {
@@ -294,36 +413,67 @@ func (l *L2OutputSubmitter) sendTransaction(ctx context.Context, output *eth.Out
 // loop is responsible for creating & submitting the next outputs
 func (l *L2OutputSubmitter) loop() {
 	defer l.wg.Done()
-
 	ctx := l.ctx
 
+	if l.dgfContract == nil {
+		l.loopL2OO(ctx)
+	} else {
+		l.loopDGF(ctx)
+	}
+}
+
+func (l *L2OutputSubmitter) loopL2OO(ctx context.Context) {
 	ticker := time.NewTicker(l.Cfg.PollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			output, shouldPropose, err := l.FetchNextOutputInfo(ctx)
-			if err != nil {
+			if err != nil || !shouldPropose {
 				break
 			}
-			if !shouldPropose {
-				break
-			}
-			cCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			if err := l.sendTransaction(cCtx, output); err != nil {
-				l.Log.Error("Failed to send proposal transaction",
-					"err", err,
-					"l1blocknum", output.Status.CurrentL1.Number,
-					"l1blockhash", output.Status.CurrentL1.Hash,
-					"l1head", output.Status.HeadL1.Number)
-				cancel()
-				break
-			}
-			l.Metr.RecordL2BlocksProposed(output.BlockRef)
-			cancel()
 
+			l.proposeOutput(ctx, output)
 		case <-l.done:
 			return
 		}
 	}
+}
+
+func (l *L2OutputSubmitter) loopDGF(ctx context.Context) {
+	ticker := time.NewTicker(l.Cfg.ProposalInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			blockNumber, err := l.FetchCurrentBlockNumber(ctx)
+			if err != nil {
+				break
+			}
+
+			output, shouldPropose, err := l.fetchOutput(ctx, blockNumber)
+			if err != nil || !shouldPropose {
+				break
+			}
+
+			l.proposeOutput(ctx, output)
+		case <-l.done:
+			return
+		}
+	}
+}
+
+func (l *L2OutputSubmitter) proposeOutput(ctx context.Context, output *eth.OutputResponse) {
+	cCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	if err := l.sendTransaction(cCtx, output); err != nil {
+		l.Log.Error("Failed to send proposal transaction",
+			"err", err,
+			"l1blocknum", output.Status.CurrentL1.Number,
+			"l1blockhash", output.Status.CurrentL1.Hash,
+			"l1head", output.Status.HeadL1.Number)
+		return
+	}
+	l.Metr.RecordL2BlocksProposed(output.BlockRef)
 }

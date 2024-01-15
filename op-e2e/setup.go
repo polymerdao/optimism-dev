@@ -12,11 +12,13 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/dial"
 	ds "github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/sync"
+	dsSync "github.com/ipfs/go-datastore/sync"
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -38,6 +40,7 @@ import (
 
 	bss "github.com/ethereum-optimism/optimism/op-batcher/batcher"
 	"github.com/ethereum-optimism/optimism/op-batcher/compressor"
+	batcherFlags "github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-bindings/predeploys"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/genesis"
 	"github.com/ethereum-optimism/optimism/op-e2e/config"
@@ -52,6 +55,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	l2os "github.com/ethereum-optimism/optimism/op-proposer/proposer"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/clock"
@@ -127,6 +131,7 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				L1EpochPollInterval:         time.Second * 2,
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
+				Sync:                        sync.Config{SyncMode: sync.CLSync},
 			},
 			"verifier": {
 				Driver: driver.Config{
@@ -137,6 +142,7 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				L1EpochPollInterval:         time.Second * 4,
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
+				Sync:                        sync.Config{SyncMode: sync.CLSync},
 			},
 		},
 		Loggers: map[string]log.Logger{
@@ -271,30 +277,90 @@ type System struct {
 	// Note that this time travel may occur in a single block, creating a very large difference in the Time
 	// on sequential blocks.
 	TimeTravelClock *clock.AdvancingClock
+
+	t      *testing.T
+	closed atomic.Bool
+
+	// rollupClients caches the lazily created RollupClient instances so they can be reused and closed
+	rollupClients map[string]*sources.RollupClient
 }
 
 func (sys *System) NodeEndpoint(name string) string {
 	return selectEndpoint(sys.EthInstances[name])
 }
 
+func (sys *System) NodeClient(name string) *ethclient.Client {
+	return sys.Clients[name]
+}
+
+func (sys *System) RollupEndpoint(name string) string {
+	return sys.RollupNodes[name].HTTPEndpoint()
+}
+
+func (sys *System) RollupClient(name string) *sources.RollupClient {
+	client, ok := sys.rollupClients[name]
+	if ok {
+		return client
+	}
+	logger := testlog.Logger(sys.t, log.LvlInfo).New("rollupClient", name)
+	endpoint := sys.RollupEndpoint(name)
+	client, err := dial.DialRollupClientWithTimeout(context.Background(), 30*time.Second, logger, endpoint)
+	require.NoErrorf(sys.t, err, "Failed to dial rollup client %v", name)
+	sys.rollupClients[name] = client
+	return client
+}
+
+func (sys *System) L1Deployments() *genesis.L1Deployments {
+	return sys.Cfg.L1Deployments
+}
+
+func (sys *System) RollupCfg() *rollup.Config {
+	return sys.RollupConfig
+}
+
+func (sys *System) L2Genesis() *core.Genesis {
+	return sys.L2GenesisCfg
+}
+
 func (sys *System) Close() {
+	if !sys.closed.CompareAndSwap(false, true) {
+		// Already closed.
+		return
+	}
 	postCtx, postCancel := context.WithCancel(context.Background())
 	postCancel() // immediate shutdown, no allowance for idling
 
+	var combinedErr error
 	if sys.L2OutputSubmitter != nil {
-		_ = sys.L2OutputSubmitter.Kill()
+		if err := sys.L2OutputSubmitter.Kill(); err != nil && !errors.Is(err, l2os.ErrAlreadyStopped) {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop L2OutputSubmitter: %w", err))
+		}
 	}
 	if sys.BatchSubmitter != nil {
-		_ = sys.BatchSubmitter.Kill()
+		if err := sys.BatchSubmitter.Kill(); err != nil && !errors.Is(err, bss.ErrAlreadyStopped) {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop BatchSubmitter: %w", err))
+		}
 	}
 
-	for _, node := range sys.RollupNodes {
-		_ = node.Stop(postCtx)
+	for name, node := range sys.RollupNodes {
+		if err := node.Stop(postCtx); err != nil && !errors.Is(err, rollupNode.ErrAlreadyClosed) {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop rollup node %v: %w", name, err))
+		}
 	}
-	for _, ei := range sys.EthInstances {
-		ei.Close()
+	for name, ei := range sys.EthInstances {
+		if err := ei.Close(); err != nil && !errors.Is(err, node.ErrNodeStopped) {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop EthInstance %v: %w", name, err))
+		}
 	}
-	sys.Mocknet.Close()
+	for _, client := range sys.rollupClients {
+		client.Close()
+	}
+	if sys.Mocknet != nil {
+		if err := sys.Mocknet.Close(); err != nil {
+			combinedErr = errors.Join(combinedErr, fmt.Errorf("stop Mocknet: %w", err))
+		}
+	}
+	require.NoError(sys.t, combinedErr, "Failed to stop system")
 }
 
 type systemConfigHook func(sCfg *SystemConfig, s *System)
@@ -335,25 +401,16 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	}
 
 	sys := &System{
-		Cfg:          cfg,
-		EthInstances: make(map[string]EthInstance),
-		Clients:      make(map[string]*ethclient.Client),
-		RawClients:   make(map[string]*rpc.Client),
-		RollupNodes:  make(map[string]*rollupNode.OpNode),
+		t:             t,
+		Cfg:           cfg,
+		EthInstances:  make(map[string]EthInstance),
+		Clients:       make(map[string]*ethclient.Client),
+		RawClients:    make(map[string]*rpc.Client),
+		RollupNodes:   make(map[string]*rollupNode.OpNode),
+		rollupClients: make(map[string]*sources.RollupClient),
 	}
-	didErrAfterStart := false
-	defer func() {
-		if didErrAfterStart {
-			postCtx, postCancel := context.WithCancel(context.Background())
-			postCancel() // immediate shutdown, no allowance for idling
-			for _, node := range sys.RollupNodes {
-				_ = node.Stop(postCtx)
-			}
-			for _, ei := range sys.EthInstances {
-				ei.Close()
-			}
-		}
-	}()
+	// Automatically stop the system at the end of the test
+	t.Cleanup(sys.Close)
 
 	c := clock.SystemClock
 	if cfg.SupportL1TimeTravel {
@@ -434,7 +491,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 			RegolithTime:            cfg.DeployConfig.RegolithTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			CanyonTime:              cfg.DeployConfig.CanyonTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			DeltaTime:               cfg.DeployConfig.DeltaTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
-			EclipseTime:             cfg.DeployConfig.EclipseTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
+			EcotoneTime:             cfg.DeployConfig.EcotoneTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			FjordTime:               cfg.DeployConfig.FjordTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			InteropTime:             cfg.DeployConfig.InteropTime(uint64(cfg.DeployConfig.L1GenesisBlockTimestamp)),
 			ProtocolVersionsAddress: cfg.L1Deployments.ProtocolVersionsProxy,
@@ -468,7 +525,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	}
 	err = l1Node.Start()
 	if err != nil {
-		didErrAfterStart = true
 		return nil, err
 	}
 
@@ -485,7 +541,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 			}
 			err = gethInst.Node.Start()
 			if err != nil {
-				didErrAfterStart = true
 				return nil, err
 			}
 			ethClient = gethInst
@@ -509,11 +564,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	for name, rollupCfg := range cfg.Nodes {
 		configureL1(rollupCfg, sys.EthInstances["l1"])
 		configureL2(rollupCfg, sys.EthInstances[name], cfg.JWTSecret)
-
-		rollupCfg.L2Sync = &rollupNode.PreparedL2SyncEndpoint{
-			Client:   nil,
-			TrustRPC: false,
-		}
 	}
 
 	// Geth Clients
@@ -521,7 +571,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	defer cancel()
 	l1Srv, err := l1Node.RPCHandler()
 	if err != nil {
-		didErrAfterStart = true
 		return nil, err
 	}
 	rawL1Client := rpc.DialInProc(l1Srv)
@@ -531,7 +580,6 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 	for name, ethInst := range sys.EthInstances {
 		rawClient, err := rpc.DialContext(ctx, ethInst.WSEndpoint())
 		if err != nil {
-			didErrAfterStart = true
 			return nil, err
 		}
 		client := ethclient.NewClient(rawClient)
@@ -638,13 +686,11 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 		}
 		node, err := rollupNode.New(context.Background(), &c, l, snapLog, "", metrics.NewMetrics(""))
 		if err != nil {
-			didErrAfterStart = true
 			return nil, err
 		}
 		cycle = node
 		err = node.Start(context.Background())
 		if err != nil {
-			didErrAfterStart = true
 			return nil, err
 		}
 		sys.RollupNodes[name] = node
@@ -729,8 +775,9 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 			Level:  log.LvlInfo,
 			Format: oplog.FormatText,
 		},
-		Stopped:   sys.Cfg.DisableBatcher, // Batch submitter may be enabled later
-		BatchType: batchType,
+		Stopped:              sys.Cfg.DisableBatcher, // Batch submitter may be enabled later
+		BatchType:            batchType,
+		DataAvailabilityType: batcherFlags.CalldataType,
 	}
 	// Batch Submitter
 	batcher, err := bss.BatcherServiceFromCLIConfig(context.Background(), "0.0.1", batcherCLIConfig, sys.Cfg.Loggers["batcher"])
@@ -782,7 +829,7 @@ func (sys *System) newMockNetPeer() (host.Host, error) {
 	_ = ps.AddPrivKey(p, sk)
 	_ = ps.AddPubKey(p, sk.GetPublic())
 
-	ds := sync.MutexWrap(ds.NewMapDatastore())
+	ds := dsSync.MutexWrap(ds.NewMapDatastore())
 	eps, err := store.NewExtendedPeerstore(context.Background(), log.Root(), clock.SystemClock, ps, ds, 24*time.Hour)
 	if err != nil {
 		return nil, err
@@ -811,6 +858,7 @@ func configureL1(rollupNodeCfg *rollupNode.Config, l1Node EthInstance) {
 		RateLimit:        0,
 		BatchSize:        20,
 		HttpPollInterval: time.Millisecond * 100,
+		MaxConcurrency:   10,
 	}
 }
 

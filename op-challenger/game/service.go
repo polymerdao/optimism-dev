@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync/atomic"
 
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
@@ -23,7 +24,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
@@ -40,11 +41,13 @@ type Service struct {
 
 	loader *loader.GameLoader
 
+	rollupClient *sources.RollupClient
+
 	l1Client   *ethclient.Client
 	pollClient client.RPC
 
-	pprofSrv   *httputil.HTTPServer
-	metricsSrv *httputil.HTTPServer
+	pprofService *oppprof.Service
+	metricsSrv   *httputil.HTTPServer
 
 	balanceMetricer io.Closer
 
@@ -68,25 +71,28 @@ func NewService(ctx context.Context, logger log.Logger, cfg *config.Config) (*Se
 
 func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error {
 	if err := s.initTxManager(cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to init tx manager: %w", err)
 	}
 	if err := s.initL1Client(ctx, cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to init l1 client: %w", err)
+	}
+	if err := s.initRollupClient(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to init rollup client: %w", err)
 	}
 	if err := s.initPollClient(ctx, cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to init poll client: %w", err)
 	}
-	if err := s.initPProfServer(&cfg.PprofConfig); err != nil {
-		return err
+	if err := s.initPProf(&cfg.PprofConfig); err != nil {
+		return fmt.Errorf("failed to init profiling: %w", err)
 	}
 	if err := s.initMetricsServer(&cfg.MetricsConfig); err != nil {
-		return err
+		return fmt.Errorf("failed to init metrics server: %w", err)
 	}
 	if err := s.initGameLoader(cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to init game loader: %w", err)
 	}
 	if err := s.initScheduler(ctx, cfg); err != nil {
-		return err
+		return fmt.Errorf("failed to init scheduler: %w", err)
 	}
 
 	s.initMonitor(cfg)
@@ -123,17 +129,20 @@ func (s *Service) initPollClient(ctx context.Context, cfg *config.Config) error 
 	return nil
 }
 
-func (s *Service) initPProfServer(cfg *oppprof.CLIConfig) error {
-	if !cfg.Enabled {
-		return nil
+func (s *Service) initPProf(cfg *oppprof.CLIConfig) error {
+	s.pprofService = oppprof.New(
+		cfg.ListenEnabled,
+		cfg.ListenAddr,
+		cfg.ListenPort,
+		cfg.ProfileType,
+		cfg.ProfileDir,
+		cfg.ProfileFilename,
+	)
+
+	if err := s.pprofService.Start(); err != nil {
+		return fmt.Errorf("failed to start pprof service: %w", err)
 	}
-	s.logger.Debug("starting pprof", "addr", cfg.ListenAddr, "port", cfg.ListenPort)
-	pprofSrv, err := oppprof.StartServer(cfg.ListenAddr, cfg.ListenPort)
-	if err != nil {
-		return fmt.Errorf("failed to start pprof server: %w", err)
-	}
-	s.pprofSrv = pprofSrv
-	s.logger.Info("started pprof server", "addr", pprofSrv.Addr())
+
 	return nil
 }
 
@@ -166,9 +175,22 @@ func (s *Service) initGameLoader(cfg *config.Config) error {
 	return nil
 }
 
+func (s *Service) initRollupClient(ctx context.Context, cfg *config.Config) error {
+	if cfg.RollupRpc == "" {
+		return nil
+	}
+	rollupClient, err := dial.DialRollupClientWithTimeout(ctx, dial.DefaultDialTimeout, s.logger, cfg.RollupRpc)
+	if err != nil {
+		return err
+	}
+	s.rollupClient = rollupClient
+	return nil
+}
+
 func (s *Service) initScheduler(ctx context.Context, cfg *config.Config) error {
 	gameTypeRegistry := registry.NewGameTypeRegistry()
-	closer, err := fault.RegisterGameTypes(gameTypeRegistry, ctx, s.logger, s.metrics, cfg, s.txMgr, s.l1Client)
+	caller := batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize)
+	closer, err := fault.RegisterGameTypes(gameTypeRegistry, ctx, s.logger, s.metrics, cfg, s.rollupClient, s.txMgr, caller)
 	if err != nil {
 		return err
 	}
@@ -212,8 +234,8 @@ func (s *Service) Stop(ctx context.Context) error {
 	if s.faultGamesCloser != nil {
 		s.faultGamesCloser()
 	}
-	if s.pprofSrv != nil {
-		if err := s.pprofSrv.Stop(ctx); err != nil {
+	if s.pprofService != nil {
+		if err := s.pprofService.Stop(ctx); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close pprof server: %w", err))
 		}
 	}
@@ -227,6 +249,12 @@ func (s *Service) Stop(ctx context.Context) error {
 		s.txMgr.Close()
 	}
 
+	if s.rollupClient != nil {
+		s.rollupClient.Close()
+	}
+	if s.pollClient != nil {
+		s.pollClient.Close()
+	}
 	if s.l1Client != nil {
 		s.l1Client.Close()
 	}

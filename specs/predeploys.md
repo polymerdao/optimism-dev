@@ -30,8 +30,8 @@
 ## Overview
 
 [Predeployed smart contracts](./glossary.md#predeployed-contract-predeploy) exist on Optimism
-at predetermined addresses in the genesis state. They are  similar to precompiles but instead run
-directly in the EVM instead of running  native code outside of the EVM.
+at predetermined addresses in the genesis state. They are similar to precompiles but instead run
+directly in the EVM instead of running native code outside of the EVM.
 
 Predeploys are used instead of precompiles to make it easier for multiclient
 implementations as well as allowing for more integration with hardhat/foundry
@@ -48,29 +48,29 @@ The following table includes each of the predeploys. The system version
 indicates when the predeploy was introduced. The possible values are `Legacy`
 or `Bedrock` or `Canyon`. Deprecated contracts should not be used.
 
-| Name                          | Address                                    | Introduced | Deprecated | Proxied |
-| ----------------------------- | ------------------------------------------ | ---------- | ---------- |---------|
-| LegacyMessagePasser           | 0x4200000000000000000000000000000000000000 | Legacy     | Yes        | Yes     |
-| DeployerWhitelist             | 0x4200000000000000000000000000000000000002 | Legacy     | Yes        | Yes     |
-| LegacyERC20ETH                | 0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000 | Legacy     | Yes        | No      |
-| WETH9                         | 0x4200000000000000000000000000000000000006 | Legacy     | No         | No      |
-| L2CrossDomainMessenger        | 0x4200000000000000000000000000000000000007 | Legacy     | No         | Yes     |
-| L2StandardBridge              | 0x4200000000000000000000000000000000000010 | Legacy     | No         | Yes     |
-| SequencerFeeVault             | 0x4200000000000000000000000000000000000011 | Legacy     | No         | Yes     |
-| OptimismMintableERC20Factory  | 0x4200000000000000000000000000000000000012 | Legacy     | No         | Yes     |
-| L1BlockNumber                 | 0x4200000000000000000000000000000000000013 | Legacy     | Yes        | Yes     |
-| GasPriceOracle                | 0x420000000000000000000000000000000000000F | Legacy     | No         | Yes     |
-| GovernanceToken               | 0x4200000000000000000000000000000000000042 | Legacy     | No         | No      |
-| L1Block                       | 0x4200000000000000000000000000000000000015 | Bedrock    | No         | Yes     |
-| L2ToL1MessagePasser           | 0x4200000000000000000000000000000000000016 | Bedrock    | No         | Yes     |
-| L2ERC721Bridge                | 0x4200000000000000000000000000000000000014 | Legacy     | No         | Yes     |
-| OptimismMintableERC721Factory | 0x4200000000000000000000000000000000000017 | Bedrock    | No         | Yes     |
-| ProxyAdmin                    | 0x4200000000000000000000000000000000000018 | Bedrock    | No         | Yes     |
-| BaseFeeVault                  | 0x4200000000000000000000000000000000000019 | Bedrock    | No         | Yes     |
-| L1FeeVault                    | 0x420000000000000000000000000000000000001a | Bedrock    | No         | Yes     |
-| SchemaRegistry                | 0x4200000000000000000000000000000000000020 | Bedrock    | No         | Yes     |
-| EAS                           | 0x4200000000000000000000000000000000000021 | Bedrock    | No         | Yes     |
-| create2Deployer               | 0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2 | Canyon     | No         | No      |
+| Name                                      | Address                                    | Introduced  | Deprecated | Proxied |
+| ----------------------------------------- | ------------------------------------------ | ----------- | ---------- | ------- |
+| LegacyMessagePasser                       | 0x4200000000000000000000000000000000000000 | Legacy      | Yes        | Yes     |
+| DeployerWhitelist                         | 0x4200000000000000000000000000000000000002 | Legacy      | Yes        | Yes     |
+| LegacyERC20ETH                            | 0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000 | Legacy      | Yes        | No      |
+| WETH9                                     | 0x4200000000000000000000000000000000000006 | Legacy      | No         | No      |
+| L2CrossDomainMessenger                    | 0x4200000000000000000000000000000000000007 | Legacy      | No         | Yes     |
+| L2StandardBridge                          | 0x4200000000000000000000000000000000000010 | Legacy      | No         | Yes     |
+| SequencerFeeVault                         | 0x4200000000000000000000000000000000000011 | Legacy      | No         | Yes     |
+| OptimismMintableERC20Factory              | 0x4200000000000000000000000000000000000012 | Legacy      | No         | Yes     |
+| L1BlockNumber                             | 0x4200000000000000000000000000000000000013 | Legacy      | Yes        | Yes     |
+| GasPriceOracle                            | 0x420000000000000000000000000000000000000F | Legacy      | No         | Yes     |
+| GovernanceToken                           | 0x4200000000000000000000000000000000000042 | Legacy      | No         | No      |
+| L1Block                                   | 0x4200000000000000000000000000000000000015 | Bedrock     | No         | Yes     |
+| L2ToL1MessagePasser                       | 0x4200000000000000000000000000000000000016 | Bedrock     | No         | Yes     |
+| L2ERC721Bridge                            | 0x4200000000000000000000000000000000000014 | Legacy      | No         | Yes     |
+| OptimismMintableERC721Factory             | 0x4200000000000000000000000000000000000017 | Bedrock     | No         | Yes     |
+| ProxyAdmin                                | 0x4200000000000000000000000000000000000018 | Bedrock     | No         | Yes     |
+| BaseFeeVault                              | 0x4200000000000000000000000000000000000019 | Bedrock     | No         | Yes     |
+| L1FeeVault                                | 0x420000000000000000000000000000000000001a | Bedrock     | No         | Yes     |
+| SchemaRegistry                            | 0x4200000000000000000000000000000000000020 | Bedrock     | No         | Yes     |
+| EAS                                       | 0x4200000000000000000000000000000000000021 | Bedrock     | No         | Yes     |
+| create2Deployer                           | 0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2 | Canyon      | No         | No      |
 
 ## LegacyMessagePasser
 
@@ -219,9 +219,9 @@ L1 on L2.
 Address: `0x420000000000000000000000000000000000000F`
 
 In the legacy system, the `GasPriceOracle` was a permissioned contract
-that was pushed the L1 basefee and the L2 gas price by an offchain actor.
+that was pushed the L1 base fee and the L2 gas price by an offchain actor.
 The offchain actor observes the L1 blockheaders to get the
-L1 basefee as well as the gas usage on L2 to compute what the L2 gas price
+L1 base fee as well as the gas usage on L2 to compute what the L2 gas price
 should be based on a congestion control algorithm.
 
 After Bedrock, the `GasPriceOracle` is no longer a permissioned contract
@@ -231,16 +231,25 @@ the L1 portion of the fee. This fee pays for using L1 as a data availability
 layer and should be added to the L2 portion of the fee, which pays for
 execution, to compute the total transaction fee.
 
-The values used to compute the L2 portion of the fee are:
+The values used to compute the L1 portion of the fee prior to the Ecotone upgrade are:
 
 - scalar
 - overhead
 - decimals
 
 After the Bedrock upgrade, these values are instead managed by the
-`SystemConfig` contract on L2. The `scalar` and `overhead` values
+`SystemConfig` contract on L1. The `scalar` and `overhead` values
 are sent to the `L1Block` contract each block and the `decimals` value
 has been hardcoded to 6.
+
+Following the Ecotone upgrade, the values used for L1 fee computation are:
+
+- l1BaseFeeScalar
+- l1BlobBaseFeeScalar
+- decimals
+
+These values are managed by the `SystemConfig` contract on the L1. The`decimals` remains hardcoded
+to 6, and the old `scalar` and `overhead` values are ignored.
 
 ## L1Block
 
@@ -286,7 +295,7 @@ used for depositing native L1 tokens into. These ERC20 contracts can be created 
 and implement the interface required by the `StandardBridge` to just work with deposits and withdrawals.
 
 Each ERC20 contract that is created by the `OptimismMintableERC20Factory` allows for the `L2StandardBridge` to mint
-and burn tokens, depending on if the user is depositing from L1 to L2 or withdrawaing from L2 to L1.
+and burn tokens, depending on if the user is depositing from L1 to L2 or withdrawing from L2 to L1.
 
 ## OptimismMintableERC721Factory
 
@@ -303,7 +312,7 @@ depositing native L1 NFTs into.
 
 Address: `0x4200000000000000000000000000000000000019`
 
-The `BaseFeeVault` predeploy receives the basefees on L2. The basefee is not
+The `BaseFeeVault` predeploy receives the base fees on L2. The base fee is not
 burnt on L2 like it is on L1. Once the contract has received a certain amount
 of fees, the ETH can be withdrawn to an immutable address on
 L1.
@@ -355,20 +364,17 @@ The create2Deployer is a nice Solidity wrapper around the CREATE2 opcode. It pro
      * - the factory must have a balance of at least `value`.
      * - if `value` is non-zero, `bytecode` must have a `payable` constructor.
      */
-    function deploy(uint256 value, bytes32 salt, bytes memory code) public
-
+    function deploy(uint256 value, bytes32 salt, bytes memory code) public;
     /**
      * @dev Deployment of the {ERC1820Implementer}.
      * Further information: https://eips.ethereum.org/EIPS/eip-1820
      */
-    function deployERC1820Implementer(uint256 value, bytes32 salt)
-
+    function deployERC1820Implementer(uint256 value, bytes32 salt);
     /**
      * @dev Returns the address where a contract will be stored if deployed via {deploy}.
      * Any change in the `bytecodeHash` or `salt` will result in a new destination address.
      */
-    function computeAddress(bytes32 salt, bytes32 codeHash) public view returns (address)
-
+    function computeAddress(bytes32 salt, bytes32 codeHash) public view returns (address);
     /**
      * @dev Returns the address where a contract will be stored if deployed via {deploy} from a
      * contract located at `deployer`. If `deployer` is this contract's address, returns the
@@ -378,7 +384,7 @@ The create2Deployer is a nice Solidity wrapper around the CREATE2 opcode. It pro
         bytes32 salt,
         bytes32 codeHash,
         address deployer
-    ) public pure returns (address)
+    ) public pure returns (address);
 ```
 
 Address: `0x13b0D85CcB8bf860b6b79AF3029fCA081AE9beF2`

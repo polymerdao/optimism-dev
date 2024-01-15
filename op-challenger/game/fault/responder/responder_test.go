@@ -3,6 +3,7 @@ package responder
 import (
 	"context"
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/types"
@@ -179,8 +180,7 @@ func TestPerformAction(t *testing.T) {
 			PreState:  []byte{1, 2, 3},
 			ProofData: []byte{4, 5, 6},
 			OracleData: &types.PreimageOracleData{
-				IsLocal:      true,
-				LocalContext: common.Hash{0x06},
+				IsLocal: true,
 			},
 		}
 		err := responder.PerformAction(context.Background(), action)
@@ -188,6 +188,7 @@ func TestPerformAction(t *testing.T) {
 
 		require.Len(t, mockTxMgr.sent, 2)
 		require.EqualValues(t, action.OracleData, contract.updateOracleArgs)
+		require.EqualValues(t, action.ParentIdx, contract.updateOracleClaimIdx)
 		require.EqualValues(t, []interface{}{uint64(action.ParentIdx), action.IsAttack, action.PreState, action.ProofData}, contract.stepArgs)
 		// Important that the oracle is updated first
 		require.Equal(t, ([]byte)("updateOracle"), mockTxMgr.sent[0].TxData)
@@ -236,12 +237,13 @@ func (m *mockTxManager) Close() {
 }
 
 type mockContract struct {
-	calls            int
-	callFails        bool
-	attackArgs       []interface{}
-	defendArgs       []interface{}
-	stepArgs         []interface{}
-	updateOracleArgs *types.PreimageOracleData
+	calls                int
+	callFails            bool
+	attackArgs           []interface{}
+	defendArgs           []interface{}
+	stepArgs             []interface{}
+	updateOracleClaimIdx uint64
+	updateOracleArgs     *types.PreimageOracleData
 }
 
 func (m *mockContract) CallResolve(_ context.Context) (gameTypes.GameStatus, error) {
@@ -283,7 +285,12 @@ func (m *mockContract) StepTx(claimIdx uint64, isAttack bool, stateData []byte, 
 	return txmgr.TxCandidate{TxData: ([]byte)("step")}, nil
 }
 
-func (m *mockContract) UpdateOracleTx(_ context.Context, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
+func (m *mockContract) UpdateOracleTx(_ context.Context, claimIdx uint64, data *types.PreimageOracleData) (txmgr.TxCandidate, error) {
+	m.updateOracleClaimIdx = claimIdx
 	m.updateOracleArgs = data
 	return txmgr.TxCandidate{TxData: ([]byte)("updateOracle")}, nil
+}
+
+func (m *mockContract) GetRequiredBond(_ context.Context, position types.Position) (*big.Int, error) {
+	return big.NewInt(5), nil
 }

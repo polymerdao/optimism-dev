@@ -12,11 +12,13 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/indexer/api/routes"
+	"github.com/ethereum-optimism/optimism/indexer/api/service"
 	"github.com/ethereum-optimism/optimism/indexer/config"
 	"github.com/ethereum-optimism/optimism/indexer/database"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
@@ -30,8 +32,7 @@ const (
 	addressParam     = "{address:%s}"
 
 	// Endpoint paths
-	// NOTE - This can be further broken out over time as new version iterations
-	// are implemented
+	DocsPath        = "/docs"
 	HealthPath      = "/healthz"
 	DepositsPath    = "/api/v0/deposits/"
 	WithdrawalsPath = "/api/v0/withdrawals/"
@@ -129,7 +130,7 @@ func (a *APIService) Addr() string {
 func (a *APIService) initDB(ctx context.Context, connector DBConnector) error {
 	db, err := connector.OpenDB(ctx, a.log)
 	if err != nil {
-		return fmt.Errorf("failed to connect to databse: %w", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	a.dbClose = db.Closer
 	a.bv = db.BridgeTransfers
@@ -137,30 +138,35 @@ func (a *APIService) initDB(ctx context.Context, connector DBConnector) error {
 }
 
 func (a *APIService) initRouter(apiConfig config.ServerConfig) {
+	v := new(service.Validator)
+
+	svc := service.New(v, a.bv, a.log)
 	apiRouter := chi.NewRouter()
-	h := routes.NewRoutes(a.log, a.bv, apiRouter)
+	h := routes.NewRoutes(a.log, apiRouter, svc)
 
-	promRecorder := metrics.NewPromHTTPRecorder(a.metricsRegistry, MetricsNamespace)
-
-	apiRouter.Use(chiMetricsMiddleware(promRecorder))
+	apiRouter.Use(middleware.Logger)
 	apiRouter.Use(middleware.Timeout(time.Duration(apiConfig.WriteTimeout) * time.Second))
 	apiRouter.Use(middleware.Recoverer)
 	apiRouter.Use(middleware.Heartbeat(HealthPath))
+	apiRouter.Use(chiMetricsMiddleware(metrics.NewPromHTTPRecorder(a.metricsRegistry, MetricsNamespace)))
 
 	apiRouter.Get(fmt.Sprintf(DepositsPath+addressParam, ethereumAddressRegex), h.L1DepositsHandler)
 	apiRouter.Get(fmt.Sprintf(WithdrawalsPath+addressParam, ethereumAddressRegex), h.L2WithdrawalsHandler)
 	apiRouter.Get(SupplyPath, h.SupplyView)
+	apiRouter.Get(DocsPath, h.DocsHandler)
 	a.router = apiRouter
 }
 
 // startServer ... Starts the API server
 func (a *APIService) startServer(serverConfig config.ServerConfig) error {
 	a.log.Debug("API server listening...", "port", serverConfig.Port)
+
 	addr := net.JoinHostPort(serverConfig.Host, strconv.Itoa(serverConfig.Port))
 	srv, err := httputil.StartHTTPServer(addr, a.router)
 	if err != nil {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
+
 	a.log.Info("API server started", "addr", srv.Addr().String())
 	a.apiServer = srv
 	return nil

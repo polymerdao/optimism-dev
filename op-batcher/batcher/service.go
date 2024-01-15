@@ -5,43 +5,51 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	_ "net/http/pprof"
-	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
+	"github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-batcher/rpc"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	oprpc "github.com/ethereum-optimism/optimism/op-service/rpc"
-	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+)
+
+var (
+	ErrAlreadyStopped = errors.New("already stopped")
 )
 
 type BatcherConfig struct {
 	NetworkTimeout         time.Duration
 	PollInterval           time.Duration
 	MaxPendingTransactions uint64
+
+	// UseBlobs is true if the batcher should use blobs instead of calldata for posting blobs
+	UseBlobs bool
 }
 
 // BatcherService represents a full batch-submitter instance and its resources,
 // and conforms to the op-service CLI Lifecycle interface.
 type BatcherService struct {
-	Log        log.Logger
-	Metrics    metrics.Metricer
-	L1Client   *ethclient.Client
-	L2Client   *ethclient.Client
-	RollupNode *sources.RollupClient
-	TxManager  txmgr.TxManager
+	Log              log.Logger
+	Metrics          metrics.Metricer
+	L1Client         *ethclient.Client
+	EndpointProvider dial.L2EndpointProvider
+	TxManager        txmgr.TxManager
 
 	BatcherConfig
 
@@ -54,15 +62,16 @@ type BatcherService struct {
 
 	Version string
 
-	pprofSrv   *httputil.HTTPServer
-	metricsSrv *httputil.HTTPServer
-	rpcServer  *oprpc.Server
+	pprofService *oppprof.Service
+	metricsSrv   *httputil.HTTPServer
+	rpcServer    *oprpc.Server
 
 	balanceMetricer io.Closer
-
-	stopped atomic.Bool
+	stopped         atomic.Bool
 
 	NotSubmittingOnStart bool
+
+	DA eigenda.IEigenDA
 }
 
 // BatcherServiceFromCLIConfig creates a new BatcherService from a CLIConfig.
@@ -86,7 +95,6 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 	bs.PollInterval = cfg.PollInterval
 	bs.MaxPendingTransactions = cfg.MaxPendingTransactions
 	bs.NetworkTimeout = cfg.TxMgrConfig.NetworkTimeout
-
 	if err := bs.initRPCClients(ctx, cfg); err != nil {
 		return err
 	}
@@ -104,7 +112,10 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 		return fmt.Errorf("failed to start metrics server: %w", err)
 	}
 	if err := bs.initPProf(cfg); err != nil {
-		return fmt.Errorf("failed to start pprof server: %w", err)
+		return fmt.Errorf("failed to init profiling: %w", err)
+	}
+	if err := bs.initDA(cfg); err != nil {
+		return fmt.Errorf("failed to init DA: %w", err)
 	}
 	bs.initDriver()
 	if err := bs.initRPCServer(cfg); err != nil {
@@ -123,17 +134,19 @@ func (bs *BatcherService) initRPCClients(ctx context.Context, cfg *CLIConfig) er
 	}
 	bs.L1Client = l1Client
 
-	l2Client, err := dial.DialEthClientWithTimeout(ctx, dial.DefaultDialTimeout, bs.Log, cfg.L2EthRpc)
-	if err != nil {
-		return fmt.Errorf("failed to dial L2 engine RPC: %w", err)
+	var endpointProvider dial.L2EndpointProvider
+	if strings.Contains(cfg.RollupRpc, ",") && strings.Contains(cfg.L2EthRpc, ",") {
+		rollupUrls := strings.Split(cfg.RollupRpc, ",")
+		ethUrls := strings.Split(cfg.L2EthRpc, ",")
+		endpointProvider, err = dial.NewActiveL2EndpointProvider(ctx, ethUrls, rollupUrls, dial.DefaultActiveSequencerFollowerCheckDuration, dial.DefaultDialTimeout, bs.Log)
+	} else {
+		endpointProvider, err = dial.NewStaticL2EndpointProvider(ctx, bs.Log, cfg.L2EthRpc, cfg.RollupRpc)
 	}
-	bs.L2Client = l2Client
+	if err != nil {
+		return fmt.Errorf("failed to build L2 endpoint provider: %w", err)
+	}
+	bs.EndpointProvider = endpointProvider
 
-	rollupClient, err := dial.DialRollupClientWithTimeout(ctx, dial.DefaultDialTimeout, bs.Log, cfg.RollupRpc)
-	if err != nil {
-		return fmt.Errorf("failed to dial L2 rollup-client RPC: %w", err)
-	}
-	bs.RollupNode = rollupClient
 	return nil
 }
 
@@ -154,7 +167,11 @@ func (bs *BatcherService) initBalanceMonitor(cfg *CLIConfig) {
 }
 
 func (bs *BatcherService) initRollupConfig(ctx context.Context) error {
-	rollupConfig, err := bs.RollupNode.RollupConfig(ctx)
+	rollupNode, err := bs.EndpointProvider.RollupClient(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve rollup client: %w", err)
+	}
+	rollupConfig, err := rollupNode.RollupConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve rollup config: %w", err)
 	}
@@ -171,10 +188,22 @@ func (bs *BatcherService) initChannelConfig(cfg *CLIConfig) error {
 		ChannelTimeout:     bs.RollupConfig.ChannelTimeout,
 		MaxChannelDuration: cfg.MaxChannelDuration,
 		SubSafetyMargin:    cfg.SubSafetyMargin,
-		MaxFrameSize:       cfg.MaxL1TxSize - 1, // subtract 1 byte for version
 		CompressorConfig:   cfg.CompressorConfig.Config(),
 		BatchType:          cfg.BatchType,
 	}
+
+	switch cfg.DataAvailabilityType {
+	case flags.BlobsType:
+		bs.ChannelConfig.MaxFrameSize = eth.MaxBlobDataSize
+		bs.UseBlobs = true
+	case flags.CalldataType:
+		bs.ChannelConfig.MaxFrameSize = cfg.MaxL1TxSize
+		bs.UseBlobs = false
+	default:
+		return fmt.Errorf("unknown data availability type: %v", cfg.DataAvailabilityType)
+	}
+	bs.ChannelConfig.MaxFrameSize-- // subtract 1 byte for version
+
 	if err := bs.ChannelConfig.Check(); err != nil {
 		return fmt.Errorf("invalid channel configuration: %w", err)
 	}
@@ -191,16 +220,19 @@ func (bs *BatcherService) initTxManager(cfg *CLIConfig) error {
 }
 
 func (bs *BatcherService) initPProf(cfg *CLIConfig) error {
-	if !cfg.PprofConfig.Enabled {
-		return nil
+	bs.pprofService = oppprof.New(
+		cfg.PprofConfig.ListenEnabled,
+		cfg.PprofConfig.ListenAddr,
+		cfg.PprofConfig.ListenPort,
+		cfg.PprofConfig.ProfileType,
+		cfg.PprofConfig.ProfileDir,
+		cfg.PprofConfig.ProfileFilename,
+	)
+
+	if err := bs.pprofService.Start(); err != nil {
+		return fmt.Errorf("failed to start pprof service: %w", err)
 	}
-	log.Debug("starting pprof server", "addr", net.JoinHostPort(cfg.PprofConfig.ListenAddr, strconv.Itoa(cfg.PprofConfig.ListenPort)))
-	srv, err := oppprof.StartServer(cfg.PprofConfig.ListenAddr, cfg.PprofConfig.ListenPort)
-	if err != nil {
-		return err
-	}
-	bs.pprofSrv = srv
-	log.Info("started pprof server", "addr", srv.Addr())
+
 	return nil
 }
 
@@ -225,16 +257,35 @@ func (bs *BatcherService) initMetricsServer(cfg *CLIConfig) error {
 
 func (bs *BatcherService) initDriver() {
 	bs.driver = NewBatchSubmitter(DriverSetup{
-		Log:           bs.Log,
-		Metr:          bs.Metrics,
-		RollupConfig:  bs.RollupConfig,
-		Config:        bs.BatcherConfig,
-		Txmgr:         bs.TxManager,
-		L1Client:      bs.L1Client,
-		L2Client:      bs.L2Client,
-		RollupClient:  bs.RollupNode,
-		ChannelConfig: bs.ChannelConfig,
+		Log:              bs.Log,
+		Metr:             bs.Metrics,
+		RollupConfig:     bs.RollupConfig,
+		Config:           bs.BatcherConfig,
+		Txmgr:            bs.TxManager,
+		L1Client:         bs.L1Client,
+		EndpointProvider: bs.EndpointProvider,
+		ChannelConfig:    bs.ChannelConfig,
+		DA:               bs.DA,
 	})
+}
+
+func (bs *BatcherService) initDA(cfg *CLIConfig) error {
+	disperserSecurityParams := []*disperser.SecurityParams{}
+	disperserSecurityParams = append(disperserSecurityParams, &disperser.SecurityParams{
+		QuorumId:           cfg.DAConfig.PrimaryQuorumID,
+		AdversaryThreshold: cfg.DAConfig.PrimaryAdversaryThreshold,
+		QuorumThreshold:    cfg.DAConfig.PrimaryQuorumThreshold,
+	})
+	bs.DA = &eigenda.EigenDA{
+		Config: eigenda.Config{
+			RPC:                      cfg.DAConfig.RPC,
+			DisperserSecurityParams:  disperserSecurityParams,
+			StatusQueryTimeout:       cfg.DAConfig.StatusQueryTimeout,
+			StatusQueryRetryInterval: cfg.DAConfig.StatusQueryRetryInterval,
+		},
+		Log: bs.Log,
+	}
+	return nil
 }
 
 func (bs *BatcherService) initRPCServer(cfg *CLIConfig) error {
@@ -285,7 +336,7 @@ func (bs *BatcherService) Kill() error {
 // If the provided ctx is cancelled, the stopping is forced, i.e. the batching work is killed non-gracefully.
 func (bs *BatcherService) Stop(ctx context.Context) error {
 	if bs.stopped.Load() {
-		return errors.New("already stopped")
+		return ErrAlreadyStopped
 	}
 	bs.Log.Info("Stopping batcher")
 
@@ -302,8 +353,8 @@ func (bs *BatcherService) Stop(ctx context.Context) error {
 			result = errors.Join(result, fmt.Errorf("failed to stop RPC server: %w", err))
 		}
 	}
-	if bs.pprofSrv != nil {
-		if err := bs.pprofSrv.Stop(ctx); err != nil {
+	if bs.pprofService != nil {
+		if err := bs.pprofService.Stop(ctx); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to stop PProf server: %w", err))
 		}
 	}
@@ -325,11 +376,8 @@ func (bs *BatcherService) Stop(ctx context.Context) error {
 	if bs.L1Client != nil {
 		bs.L1Client.Close()
 	}
-	if bs.L2Client != nil {
-		bs.L2Client.Close()
-	}
-	if bs.RollupNode != nil {
-		bs.RollupNode.Close()
+	if bs.EndpointProvider != nil {
+		bs.EndpointProvider.Close()
 	}
 
 	if result == nil {

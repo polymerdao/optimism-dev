@@ -11,13 +11,13 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 
-	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	preimage "github.com/ethereum-optimism/optimism/op-preimage"
 	cldr "github.com/ethereum-optimism/optimism/op-program/client/driver"
 	"github.com/ethereum-optimism/optimism/op-program/client/l1"
 	"github.com/ethereum-optimism/optimism/op-program/client/l2"
 	oppio "github.com/ethereum-optimism/optimism/op-program/io"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
 
@@ -64,7 +64,7 @@ func RunProgram(logger log.Logger, preimageOracle io.ReadWriter, preimageHinter 
 }
 
 // runDerivation executes the L2 state transition, given a minimal interface to retrieve data.
-func runDerivation(logger log.Logger, cfg *rollup.Config, daCfg *da.DAConfig, l2Cfg *params.ChainConfig, l1Head common.Hash, l2OutputRoot common.Hash, l2Claim common.Hash, l2ClaimBlockNum uint64, l1Oracle l1.Oracle, l2Oracle l2.Oracle) error {
+func runDerivation(logger log.Logger, cfg *rollup.Config, daCfg *eigenda.Config, l2Cfg *params.ChainConfig, l1Head common.Hash, l2OutputRoot common.Hash, l2Claim common.Hash, l2ClaimBlockNum uint64, l1Oracle l1.Oracle, l2Oracle l2.Oracle) error {
 	l1Source := l1.NewOracleL1Client(logger, l1Oracle, l1Head)
 	engineBackend, err := l2.NewOracleBackedL2Chain(logger, l2Oracle, l2Cfg, l2OutputRoot)
 	if err != nil {
@@ -73,7 +73,7 @@ func runDerivation(logger log.Logger, cfg *rollup.Config, daCfg *da.DAConfig, l2
 	l2Source := l2.NewOracleEngine(cfg, logger, engineBackend)
 
 	logger.Info("Starting derivation")
-	d := cldr.NewDriver(logger, cfg, daCfg, l1Source, l2Source, l2ClaimBlockNum)
+	d := cldr.NewDriver(logger, cfg, l1Source, l2Source, l2ClaimBlockNum, daCfg)
 	for {
 		if err = d.Step(context.Background()); errors.Is(err, io.EOF) {
 			break

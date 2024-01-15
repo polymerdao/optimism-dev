@@ -1,37 +1,37 @@
 [
   {
     "bytes": "1",
-    "label": "uint8",
+    "label": "_initialized",
     "offset": 0,
     "slot": "0",
-    "type": "t_uint8"
+    "type": "uint8"
   },
   {
     "bytes": "1",
-    "label": "bool",
+    "label": "_initializing",
     "offset": 1,
     "slot": "0",
-    "type": "t_bool"
+    "type": "bool"
   },
   {
     "bytes": "32",
-    "label": "uint256",
+    "label": "startingBlockNumber",
     "offset": 0,
     "slot": "1",
-    "type": "t_uint256"
+    "type": "uint256"
   },
   {
     "bytes": "32",
-    "label": "uint256",
+    "label": "startingTimestamp",
     "offset": 0,
     "slot": "2",
-    "type": "t_uint256"
+    "type": "uint256"
   },
   {
     "bytes": "32",
-    "label": "struct Types.OutputProposal[]",
+    "label": "l2Outputs",
     "offset": 0,
     "slot": "3",
-    "type": "t_array(t_struct(OutputProposal)2677_storage)dyn_storage"
+    "type": "struct Types.OutputProposal[]"
   }
 ]

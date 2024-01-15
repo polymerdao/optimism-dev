@@ -1,4 +1,3 @@
-
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'uint256') THEN
@@ -57,13 +56,14 @@ CREATE TABLE IF NOT EXISTS l1_contract_events (
     timestamp        INTEGER NOT NULL CHECK (timestamp > 0),
 
     -- Raw Data
-    rlp_bytes VARCHAR NOT NULL
+    rlp_bytes VARCHAR NOT NULL,
+
+    UNIQUE(block_hash, log_index)
 );
 CREATE INDEX IF NOT EXISTS l1_contract_events_timestamp ON l1_contract_events(timestamp);
 CREATE INDEX IF NOT EXISTS l1_contract_events_block_hash ON l1_contract_events(block_hash);
 CREATE INDEX IF NOT EXISTS l1_contract_events_event_signature ON l1_contract_events(event_signature);
 CREATE INDEX IF NOT EXISTS l1_contract_events_contract_address ON l1_contract_events(contract_address);
-ALTER TABLE l1_contract_events ADD UNIQUE (block_hash, log_index);
 
 CREATE TABLE IF NOT EXISTS l2_contract_events (
     -- Searchable fields
@@ -76,13 +76,14 @@ CREATE TABLE IF NOT EXISTS l2_contract_events (
     timestamp        INTEGER NOT NULL CHECK (timestamp > 0),
 
     -- Raw Data
-    rlp_bytes VARCHAR NOT NULL
+    rlp_bytes VARCHAR NOT NULL,
+
+    UNIQUE(block_hash, log_index)
 );
 CREATE INDEX IF NOT EXISTS l2_contract_events_timestamp ON l2_contract_events(timestamp);
 CREATE INDEX IF NOT EXISTS l2_contract_events_block_hash ON l2_contract_events(block_hash);
 CREATE INDEX IF NOT EXISTS l2_contract_events_event_signature ON l2_contract_events(event_signature);
 CREATE INDEX IF NOT EXISTS l2_contract_events_contract_address ON l2_contract_events(contract_address);
-ALTER TABLE l2_contract_events ADD UNIQUE (block_hash, log_index);
 
 /**
  * BRIDGING DATA
@@ -119,8 +120,8 @@ CREATE TABLE IF NOT EXISTS l2_transaction_withdrawals (
     initiated_l2_event_guid VARCHAR NOT NULL UNIQUE REFERENCES l2_contract_events(guid) ON DELETE CASCADE,
 
     -- Multistep (bedrock) process of a withdrawal
-    proven_l1_event_guid    VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE CASCADE,
-    finalized_l1_event_guid VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE CASCADE,
+    proven_l1_event_guid    VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE SET NULL ON UPDATE CASCADE,
+    finalized_l1_event_guid VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE SET NULL ON UPDATE CASCADE,
     succeeded               BOOLEAN,
 
     -- transaction data
@@ -144,7 +145,7 @@ CREATE TABLE IF NOT EXISTS l1_bridge_messages(
     transaction_source_hash VARCHAR NOT NULL UNIQUE REFERENCES l1_transaction_deposits(source_hash) ON DELETE CASCADE,
 
     sent_message_event_guid    VARCHAR NOT NULL UNIQUE REFERENCES l1_contract_events(guid) ON DELETE CASCADE,
-    relayed_message_event_guid VARCHAR UNIQUE REFERENCES l2_contract_events(guid) ON DELETE CASCADE,
+    relayed_message_event_guid VARCHAR UNIQUE REFERENCES l2_contract_events(guid) ON DELETE SET NULL ON UPDATE CASCADE,
 
     -- sent message
     from_address VARCHAR NOT NULL,
@@ -166,7 +167,7 @@ CREATE TABLE IF NOT EXISTS l2_bridge_messages(
     transaction_withdrawal_hash VARCHAR NOT NULL UNIQUE REFERENCES l2_transaction_withdrawals(withdrawal_hash) ON DELETE CASCADE,
 
     sent_message_event_guid    VARCHAR NOT NULL UNIQUE REFERENCES l2_contract_events(guid) ON DELETE CASCADE,
-    relayed_message_event_guid VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE CASCADE,
+    relayed_message_event_guid VARCHAR UNIQUE REFERENCES l1_contract_events(guid) ON DELETE SET NULL ON UPDATE CASCADE,
 
     -- sent message
     from_address VARCHAR NOT NULL,

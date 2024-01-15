@@ -94,7 +94,12 @@ func TestE2EBridgeTransactionsL2ToL1MessagePasserWithdrawal(t *testing.T) {
 	l1Opts.Value = l2Opts.Value
 	depositTx, err := optimismPortal.Receive(l1Opts)
 	require.NoError(t, err)
-	_, err = wait.ForReceiptOK(context.Background(), testSuite.L1Client, depositTx.Hash())
+	depositReceipt, err := wait.ForReceiptOK(context.Background(), testSuite.L1Client, depositTx.Hash())
+	require.NoError(t, err)
+	depositInfo, err := e2etest_utils.ParseDepositInfo(depositReceipt)
+	require.NoError(t, err)
+	depositL2TxHash := types.NewTx(depositInfo.DepositTx).Hash()
+	_, err = wait.ForReceiptOK(context.Background(), testSuite.L2Client, depositL2TxHash)
 	require.NoError(t, err)
 
 	withdrawTx, err := l2ToL1MessagePasser.InitiateWithdrawal(l2Opts, aliceAddr, big.NewInt(100_000), calldata)
@@ -132,7 +137,7 @@ func TestE2EBridgeTransactionsL2ToL1MessagePasserWithdrawal(t *testing.T) {
 	require.Nil(t, withdraw.ProvenL1EventGUID)
 	require.Nil(t, withdraw.FinalizedL1EventGUID)
 
-	withdrawParams, proveReceipt := op_e2e.ProveWithdrawal(t, *testSuite.OpCfg, testSuite.L1Client, testSuite.OpSys.EthInstances["sequencer"], testSuite.OpCfg.Secrets.Alice, withdrawReceipt)
+	withdrawParams, proveReceipt := op_e2e.ProveWithdrawal(t, *testSuite.OpCfg, testSuite.OpSys, "sequencer", testSuite.OpCfg.Secrets.Alice, withdrawReceipt)
 	require.NoError(t, wait.For(context.Background(), 500*time.Millisecond, func() (bool, error) {
 		l1Header := testSuite.Indexer.BridgeProcessor.LastFinalizedL1Header
 		return l1Header != nil && l1Header.Number.Uint64() >= proveReceipt.BlockNumber.Uint64(), nil
@@ -192,7 +197,7 @@ func TestE2EBridgeTransactionsL2ToL1MessagePasserFailedWithdrawal(t *testing.T) 
 	require.NoError(t, err)
 
 	// Prove&Finalize withdrawal
-	_, finalizeReceipt := op_e2e.ProveAndFinalizeWithdrawal(t, *testSuite.OpCfg, testSuite.L1Client, testSuite.OpSys.EthInstances["sequencer"], testSuite.OpCfg.Secrets.Alice, withdrawReceipt)
+	_, finalizeReceipt := op_e2e.ProveAndFinalizeWithdrawal(t, *testSuite.OpCfg, testSuite.OpSys, "sequencer", testSuite.OpCfg.Secrets.Alice, withdrawReceipt)
 	require.NoError(t, wait.For(context.Background(), 500*time.Millisecond, func() (bool, error) {
 		l1Header := testSuite.Indexer.BridgeProcessor.LastFinalizedL1Header
 		return l1Header != nil && l1Header.Number.Uint64() >= finalizeReceipt.BlockNumber.Uint64(), nil

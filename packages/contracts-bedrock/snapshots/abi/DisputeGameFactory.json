@@ -7,104 +7,6 @@
   {
     "inputs": [
       {
-        "internalType": "Hash",
-        "name": "uuid",
-        "type": "bytes32"
-      }
-    ],
-    "name": "GameAlreadyExists",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "GameType",
-        "name": "gameType",
-        "type": "uint8"
-      }
-    ],
-    "name": "NoImplementation",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "disputeProxy",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "GameType",
-        "name": "gameType",
-        "type": "uint8"
-      },
-      {
-        "indexed": true,
-        "internalType": "Claim",
-        "name": "rootClaim",
-        "type": "bytes32"
-      }
-    ],
-    "name": "DisputeGameCreated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "impl",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "GameType",
-        "name": "gameType",
-        "type": "uint8"
-      }
-    ],
-    "name": "ImplementationSet",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": false,
-        "internalType": "uint8",
-        "name": "version",
-        "type": "uint8"
-      }
-    ],
-    "name": "Initialized",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "previousOwner",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "newOwner",
-        "type": "address"
-      }
-    ],
-    "name": "OwnershipTransferred",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "GameType",
         "name": "_gameType",
         "type": "uint8"
@@ -128,7 +30,7 @@
         "type": "address"
       }
     ],
-    "stateMutability": "nonpayable",
+    "stateMutability": "payable",
     "type": "function"
   },
   {
@@ -258,6 +160,25 @@
   {
     "inputs": [
       {
+        "internalType": "GameType",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "name": "initBonds",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "_owner",
         "type": "address"
@@ -309,6 +230,24 @@
   {
     "inputs": [
       {
+        "internalType": "GameType",
+        "name": "_gameType",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_initBond",
+        "type": "uint256"
+      }
+    ],
+    "name": "setInitBond",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "newOwner",
         "type": "address"
@@ -331,5 +270,127 @@
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "disputeProxy",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "GameType",
+        "name": "gameType",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "Claim",
+        "name": "rootClaim",
+        "type": "bytes32"
+      }
+    ],
+    "name": "DisputeGameCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "impl",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "GameType",
+        "name": "gameType",
+        "type": "uint8"
+      }
+    ],
+    "name": "ImplementationSet",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "GameType",
+        "name": "gameType",
+        "type": "uint8"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "newBond",
+        "type": "uint256"
+      }
+    ],
+    "name": "InitBondUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint8",
+        "name": "version",
+        "type": "uint8"
+      }
+    ],
+    "name": "Initialized",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "Hash",
+        "name": "uuid",
+        "type": "bytes32"
+      }
+    ],
+    "name": "GameAlreadyExists",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InsufficientBond",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "GameType",
+        "name": "gameType",
+        "type": "uint8"
+      }
+    ],
+    "name": "NoImplementation",
+    "type": "error"
   }
 ]

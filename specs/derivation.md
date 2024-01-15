@@ -24,6 +24,7 @@
 [g-sequencer-batch]: glossary.md#sequencer-batch
 [g-l2-genesis]: glossary.md#l2-genesis-block
 [g-l2-chain-inception]: glossary.md#L2-chain-inception
+[g-l2-genesis-block]: glossary.md#l2-genesis-block
 [g-batcher-transaction]: glossary.md#batcher-transaction
 [g-avail-provider]: glossary.md#data-availability-provider
 [g-batcher]: glossary.md#batcher
@@ -63,6 +64,8 @@
   - [L2 Chain Derivation Pipeline](#l2-chain-derivation-pipeline)
     - [L1 Traversal](#l1-traversal)
     - [L1 Retrieval](#l1-retrieval)
+      - [Ecotone: Blob Retrieval](#ecotone-blob-retrieval)
+        - [Blob Encoding](#blob-encoding)
     - [Frame Queue](#frame-queue)
     - [Channel Bank](#channel-bank)
       - [Pruning](#pruning)
@@ -74,6 +77,8 @@
     - [Payload Attributes Derivation](#payload-attributes-derivation)
     - [Engine Queue](#engine-queue)
       - [Engine API usage](#engine-api-usage)
+        - [Bedrock, Canyon, Delta: API Usage](#bedrock-canyon-delta-api-usage)
+        - [Ecotone: API Usage](#ecotone-api-usage)
       - [Forkchoice synchronization](#forkchoice-synchronization)
       - [L1-consolidation: payload attributes matching](#l1-consolidation-payload-attributes-matching)
       - [L1-sync: payload attributes processing](#l1-sync-payload-attributes-processing)
@@ -84,6 +89,14 @@
       - [About reorgs Post-Merge](#about-reorgs-post-merge)
 - [Deriving Payload Attributes](#deriving-payload-attributes)
   - [Deriving the Transaction List](#deriving-the-transaction-list)
+    - [Network upgrade automation transactions](#network-upgrade-automation-transactions)
+      - [Ecotone](#ecotone)
+        - [L1Block Deployment](#l1block-deployment)
+        - [GasPriceOracle Deployment](#gaspriceoracle-deployment)
+        - [L1Block Proxy Update](#l1block-proxy-update)
+        - [GasPriceOracle Proxy Update](#gaspriceoracle-proxy-update)
+        - [GasPriceOracle Enable Ecotone](#gaspriceoracle-enable-ecotone)
+        - [Beacon block roots contract deployment (EIP-4788)](#beacon-block-roots-contract-deployment-eip-4788)
   - [Building Individual Payload Attributes](#building-individual-payload-attributes)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
@@ -93,77 +106,84 @@
 > **Note** the following assumes a single sequencer and batcher. In the future, the design will be adapted to
 > accommodate multiple such entities.
 
-[L2 chain derivation][g-derivation] — deriving L2 [blocks][g-block] from L1 data — is one of the main responsibility of
-the [rollup node][g-rollup-node], both in validator mode, and in sequencer mode (where derivation acts as a sanity check
-on sequencing, and enables detecting L1 chain [re-organizations][g-reorg]).
+[L2 chain derivation][g-derivation] — deriving L2 [blocks][g-block] from L1 data — is one of the main responsibilities
+of the [rollup node][g-rollup-node], both in validator mode, and in sequencer mode (where derivation acts as a sanity
+check on sequencing, and enables detecting L1 chain [re-organizations][g-reorg]).
 
-The L2 chain is derived from the L1 chain. In particular, each L1 block is mapped to an L2 [sequencing
-epoch][g-sequencing-epoch] comprising multiple L2 blocks. The epoch number is defined to be equal to the corresponding
-L1 block number.
+The L2 chain is derived from the L1 chain. In particular, each L1 block following [L2 chain
+inception][g-l2-chain-inception] is mapped to a [sequencing epoch][g-sequencing-epoch] comprising
+at least one L2 block. Each L2 block belongs to exactly one epoch, and we call the corresponding L1
+block its [L1 origin][l1-origin]. The epoch's number equals that of its L1 origin block.
 
-To derive the L2 blocks in an epoch `E`, we need the following inputs:
+To derive the L2 blocks of epoch number `E`, we need the following inputs:
 
-- The L1 [sequencing window][g-sequencing-window] for epoch `E`: the L1 blocks in the range `[E, E + SWS)` where `SWS`
-  is the sequencing window size (note that this means that epochs are overlapping). In particular, we need:
-  - The [batcher transactions][g-batcher-transaction] included in the sequencing window. These allow us to
-      reconstruct [sequencer batches][g-sequencer-batch] containing the transactions to include in L2 blocks (each batch
-      contains a list of L2 blocks).
-    - Note that it is impossible to have a batcher transaction containing a batch relative to epoch `E` on L1 block
-        `E`, as the batch must contain the hash of L1 block `E`.
-  - The [deposits][g-deposits] made in L1 block `E` (in the form of events emitted by the [deposit
-      contract][g-deposit-contract]).
-  - The L1 block attributes from L1 block `E` (to derive the [L1 attributes deposited transaction][g-l1-attr-deposit]).
-- The state of the L2 chain after the last L2 block of epoch `E - 1`, or — if epoch `E - 1` does not exist — the
-  [L2 genesis state][g-l2-genesis].
-  - An epoch `E` does not exist if `E <= L2CI`, where `L2CI` is the [L2 chain inception][g-l2-chain-inception].
+- L1 blocks in the range `[E, E + SWS)`, called the [sequencing window][g-sequencing-window] of the epoch, and `SWS`
+  the sequencing window size. (Note that sequencing windows overlap.)
+- [Batcher transactions][g-batcher-transaction] from blocks in the sequencing window.
+  - These transactions allow us to reconstruct the epoch's [sequencer batches][g-sequencer-batch], each of
+    which will produce one L2 block. Note that:
+    - The L1 origin will never contain any data needed to construct sequencer batches since
+      each batch [must contain](#batch-format) the L1 origin hash.
+    - An epoch may have no sequencer batches.
+- [Deposits][g-deposits] made in the L1 origin (in the form of events emitted by the [deposit
+  contract][g-deposit-contract]).
+- L1 block attributes from the L1 origin (to derive the [L1 attributes deposited transaction][g-l1-attr-deposit]).
+- The state of the L2 chain after the last L2 block of the previous epoch, or the [L2 genesis state][g-l2-genesis]
+  if `E` is the first epoch.
 
-To derive the whole L2 chain from scratch, we simply start with the [L2 genesis state][g-l2-genesis], and the [L2 chain
-inception][g-l2-chain-inception] as first epoch, then process all sequencing windows in order. Refer to the
+To derive the whole L2 chain from scratch, we start with the [L2 genesis state][g-l2-genesis] and
+the [L2 genesis block] as the first L2 block. We then derive L2 blocks from each epoch in order,
+starting at the first L1 block following [L2 chain inception][g-l2-chain-inception]. Refer to the
 [Architecture section][architecture] for more information on how we implement this in practice.
-The L2 chain may contain pre-Bedrock history, but the L2 genesis here refers to the first Bedrock L2 block.
+The L2 chain may contain pre-Bedrock history, but the L2 genesis here refers to the Bedrock L2
+genesis block.
 
-Each epoch may contain a variable number of L2 blocks (one every `l2_block_time`, 2s on Optimism), at the discretion of
-[the sequencer][g-sequencer], but subject to the following constraints for each block:
+Each L2 `block` with origin `l1_origin` is subject to the following constraints (whose values are
+denominated in seconds):
 
-- `min_l2_timestamp <= block.timestamp <= max_l2_timestamp`, where
-  - all these values are denominated in seconds
-  - `min_l2_timestamp = l1_timestamp`
-    - This ensures that the L2 timestamp is not behind the L1 origin timestamp.
-  - `block.timestamp = prev_l2_timestamp + l2_block_time`
-    - `prev_l2_timestamp` is the timestamp of the last L2 block of the previous epoch
-    - `l2_block_time` is a configurable parameter of the time between L2 blocks (on Optimism, 2s)
-  - `max_l2_timestamp = max(l1_timestamp + max_sequencer_drift, min_l2_timestamp + l2_block_time)`
-    - `l1_timestamp` is the timestamp of the L1 block associated with the L2 block's epoch
-    - `max_sequencer_drift` is the most a sequencer is allowed to get ahead of L1
+- `block.timestamp = prev_l2_timestamp + l2_block_time`
+  - `prev_l2_timestamp` is the timestamp of the L2 block immediately preceding this one. If there
+    is no preceding block, then this is the genesis block, and its timestamp is explicitly
+    specified.
+  - `l2_block_time` is a configurable parameter of the time between L2 blocks (2s on Optimism).
 
-Put together, these constraints mean that there must be an L2 block every `l2_block_time` seconds, and that the
-timestamp for the first L2 block of an epoch must never fall behind the timestamp of the L1 block matching the epoch.
+- `l1_origin.timestamp <= block.timestamp <= max_l2_timestamp`, where
+  - `max_l2_timestamp = max(l1_origin.timestamp + max_sequencer_drift, prev_l2_timestamp + l2_block_time)`
+    - `max_sequencer_drift` is a configurable parameter that bounds how far the sequencer can get ahead of
+      the L1.
 
-Post-merge, Ethereum has a fixed [block time][g-block-time] of 12s (though some slots can be skipped). It is thus
-expected that with a 2-second L2 block time, most of the time, each epoch will contain `12/2 = 6` L2 blocks.
-The sequencer can however lengthen or shorten epochs (subject to above constraints).
-The rationale is to maintain liveness in case of either a skipped slot on L1, or a temporary loss of connection to L1 —
-which requires longer epochs.
-Shorter epochs are then required to avoid L2 timestamps drifting further and further ahead of L1.
+Finally, each epoch must have at least one L2 block.
 
-Note that `min_l2_timestamp + l2_block_time` ensures that a new L2 batch can always be processed, even if the
-`max_sequencer_drift` is exceeded. However, when exceeding the `max_sequencer_drift`, progression to the next L1 origin
-is enforced, with an exception to ensure the minimum timestamp bound (based on this next L1 origin) can be met in the
-next L2 batch, and `len(batch.transactions) == 0` continues to be enforced while the `max_sequencer_drift` is exceeded.
-See [Batch Queue] for more details.
+The first constraint means there must be an L2 block every `l2_block_time` seconds following L2
+chain inception.
+
+The second constraint ensures that an L2 block timestamp never precedes its L1 origin timestamp,
+and is never more than `max_sequencer_drift` ahead of it, except only in the unusual case where it
+might prohibit an L2 block from being produced every l2_block_time seconds. (Such cases might arise
+for example under a proof-of-work L1 that sees a period of rapid L1 block production.)  In either
+case, the sequencer enforces `len(batch.transactions) == 0` while `max_sequencer_drift` is
+exceeded. See [Batch Queue](#batch-queue) for more details.
+
+The final requirement that each epoch must have at least one L2 block ensures that all relevant
+information from the L1 (e.g. deposits) is represented in the L2, even if it has no sequencer
+batches.
+
+Post-merge, Ethereum has a fixed 12s [block time][g-block-time], though some slots can be
+skipped. Under a 2s L2 block time, we thus expect each epoch to typically contain `12/2 = 6` L2
+blocks. The sequencer will however produce bigger epochs in order to maintain liveness in case of
+either a skipped slot on the L1 or a temporary loss of connection to it. For the lost connection
+case, smaller epochs might be produced after the connection was restored to keep L2 timestamps from
+drifting further and further ahead.
 
 ## Eager Block Derivation
 
-In practice, it is often not necessary to wait for a full sequencing window of L1 blocks in order to start deriving the
-L2 blocks in an epoch. Indeed, as long as we are able to reconstruct sequential batches, we can start deriving the
-corresponding L2 blocks. We call this *eager block derivation*.
-
-However, in the very worst case, we can only reconstruct the batch for the first L2 block in the epoch by reading the
-last L1 block of the sequencing window. This happens when some data for that batch is included in the last L1 block of
-the window. In that case, not only can we not derive the first L2 block in the epoch, we also cannot derive any further
-L2 block in the epoch until then, as they need the state that results from applying the epoch's first L2 block.
-(Note that this only applies to *block* derivation. Batches can still be derived and tentatively queued,
-we just won't be able to create blocks from them.)
+Deriving an L2 block requires that we have constructed its sequencer batch and derived all L2
+blocks and state updates prior to it. This means we can typically derive the L2 blocks of an epoch
+*eagerly* without waiting on the full sequencing window. The full sequencing window is required
+before derivation only in the very worst case where some portion of the sequencer batch for the
+first block of the epoch appears in the very last L1 block of the window. Note that this only
+applies to *block* derivation. Sequencer batches can still be derived and tentatively queued
+without deriving blocks from them.
 
 ------------------------------------------------------------------------------------------------------------------------
 
@@ -461,15 +481,113 @@ updated, such that the batch-sender authentication is always accurate to the exa
 
 ### L1 Retrieval
 
-In the *L1 Retrieval* stage, we read the block we get from the outer stage (L1 traversal), and extract data from it.
-By default, the rollup operates on calldata retrieved from [batcher transactions][g-batcher-transaction] in the block,
-for each transaction:
+In the *L1 Retrieval* stage, we read the block we get from the outer stage (L1 traversal), and
+extract data from its [batcher transactions][g-batcher-transaction]. A batcher
+transaction is one with the following properties:
 
-- The receiver must be the configured batcher inbox address.
-- The sender must match the batcher address loaded from the system config matching the L1 block of the data.
+- The [`to`] field is equal to the configured batcher inbox address.
 
-Each data-transaction is versioned and contains a series of [channel frames][g-channel-frame] to be read by the
-Frame Queue, see [Batch Submission Wire Format][wire-format].
+- The sender, as recovered from the transaction signature (`v`, `r`, and `s`), is the batcher
+  address loaded from the system config matching the L1 block of the data.
+
+Each batcher transaction is versioned and contains a series of [channel frames][g-channel-frame] to
+be read by the Frame Queue, see [Batch Submission Wire Format][wire-format]. Each batcher
+transaction in the block is processed in the order they appear in the block by passing its calldata
+on to the next phase.
+
+[`to`]: https://github.com/ethereum/execution-specs/blob/3fe6514f2d9d234e760d11af883a47c1263eff51/src/ethereum/frontier/fork_types.py#L52C31-L52C31
+
+#### Ecotone: Blob Retrieval
+
+With the Ecotone upgrade the retrieval stage is extended to support an additional DA source:
+[EIP-4844] blobs. After the Ecotone upgrade we modify the iteration over batcher transactions to
+treat transactions of transaction-type == `0x03` (`BLOB_TX_TYPE`) differently. If the batcher
+transaction is a blob transaction, then its calldata MUST be ignored should it be present. Instead:
+
+- For each blob hash in `blob_versioned_hashes`, retrieve the blob that matches it. A blob may be
+    retrieved from any of a number different sources. Retrieval from a local beacon-node, through
+    the `/eth/v1/beacon/blob_sidecars/` endpoint, with `indices` filter to skip unrelated blobs, is
+    recommended.  For each retrieved blob:
+  - The blob SHOULD (MUST, if the source is untrusted) be cryptographically verified against its
+    versioned hash.
+  - If the blob has a [valid encoding][#blob-encoding], decode it into its continuous byte-string
+    and pass that on to the next phase. Otherwise the blob is ignored.
+
+Note that batcher transactions of type blob must be processed in the same loop as other batcher
+transactions to preserve the invariant that batches are always processed in the order they appear
+in the block. We ignore calldata in blob transactions so that it may be used in the future for
+batch metadata or other purposes.
+
+##### Blob Encoding
+
+Each blob in a [EIP-4844] transaction really consists of `FIELD_ELEMENTS_PER_BLOB = 4096` field elements.
+
+Each field element is a number in a prime field of
+`BLS_MODULUS = 52435875175126190479447740508185965837690552500527637822603658699938581184513`.
+This number does not represent a full `uint256`: `math.log2(BLS_MODULUS) = 254.8570894...`
+
+The [L1 consensus-specs](https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/polynomial-commitments.md)
+describe the encoding of this polynomial.
+The field elements are encoded as big-endian integers (`KZG_ENDIANNESS = big`).
+
+To save computational overhead, only `254` bits per field element are used for rollup data.
+
+`127` bytes of application-layer rollup data is encoded at a time, into 4 adjacent field elements of the blob:
+
+```python
+# read(N): read the next N bytes from the application-layer rollup-data. The next read starts where the last stopped.
+# write(V): append V (one or more bytes) to the raw blob.
+bytes tailA = read(31)
+byte x = read(1)
+byte A = x & 0b0011_1111
+write(A)
+write(tailA)
+
+bytes tailB = read(31)
+byte y = read(1)
+byte B = (y & 0b0000_1111) | (x & 0b1100_0000) >> 2)
+write(B)
+write(tailB)
+
+bytes tailC = read(31)
+byte z = read(1)
+byte C = z & 0b0011_1111
+write(C)
+write(tailC)
+
+bytes tailD = read(31)
+byte D = ((z & 0b1100_0000) >> 2) | ((y & 0b1111_0000) >> 4)
+write(D)
+write(tailD)
+```
+
+Each written field element looks like this:
+
+- Starts with one of the prepared 6-bit left-padded byte values, to keep the field element within valid range.
+- Followed by 31 bytes of application-layer data, to fill the low 31 bytes of the field element.
+
+The written output should look like this:
+
+```text
+<----- element 0 -----><----- element 1 -----><----- element 2 -----><----- element 3 ----->
+| byte A |  tailA...  || byte B |  tailB...  || byte C |  tailC...  || byte D |  tailD...  |
+```
+
+The above is repeated 1024 times, to fill all `4096` elements,
+with a total of `(4 * 31 + 3) * 1024 = 130048` bytes of data.
+
+When decoding a blob, the top-most two bits of each field-element must be 0,
+to make the encoding/decoding bijective.
+
+The first byte of rollup-data (second byte in first field element) is used as a version-byte.
+
+In version `0`, the next 3 bytes of data are used to encode the length of the rollup-data, as big-endian `uint24`.
+Any trailing data, past the length delimiter, must be 0, to keep the encoding/decoding bijective.
+If the length is larger than `130048 - 4`, the blob is invalid.
+
+If any of the encoding is invalid, the blob as whole must be ignored.
+
+[EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 
 ### Frame Queue
 
@@ -682,24 +800,55 @@ To interact with the engine, the [execution engine API][exec-engine] is used, wi
 
 [exec-engine]: exec-engine.md
 
+##### Bedrock, Canyon, Delta: API Usage
+
 - [`engine_forkchoiceUpdatedV2`] — updates the forkchoice (i.e. the chain head) to `headBlockHash` if different, and
   instructs the engine to start building an execution payload if the payload attributes parameter is not `null`.
 - [`engine_getPayloadV2`] — retrieves a previously requested execution payload build.
 - [`engine_newPayloadV2`] — executes an execution payload to create a block.
 
-The current version of `op-node` uses the `v2` RPC methods from the engine API, whereas prior versions used the `v1`
-equivalents. The `v2` methods are backwards compatible with `v1` payloads but support Shanghai.
+##### Ecotone: API Usage
+
+- [`engine_forkchoiceUpdatedV3`] — updates the forkchoice (i.e. the chain head) to `headBlockHash` if different, and
+  instructs the engine to start building an execution payload if the payload attributes parameter is not `null`.
+- [`engine_getPayloadV3`] — retrieves a previously requested execution payload build.
+- `engine_newPayload`
+  - [`engine_newPayloadV2`] — executes a Bedrock/Canyon/Delta execution payload to create a block.
+  - [`engine_newPayloadV3`] — executes an Ecotone execution payload to create a block.
+
+The current version of `op-node` uses the `v3` Engine API RPC methods as well as `engine_newPayloadV2`, due to
+`engine_newPayloadV3` only supporting Ecotone execution payloads. Both `engine_forkchoiceUpdatedV3` and
+`engine_getPayloadV3` are backwards compatible with Bedrock, Canyon & Delta payloads.
+
+Prior versions of `op-node` used `v2` and `v1` methods.
 
 [`engine_forkchoiceUpdatedV2`]: exec-engine.md#engine_forkchoiceupdatedv2
+[`engine_forkchoiceUpdatedV3`]: exec-engine.md#engine_forkchoiceupdatedv3
 [`engine_getPayloadV2`]: exec-engine.md#engine_getpayloadv2
+[`engine_getPayloadV3`]: exec-engine.md#engine_getpayloadv3
 [`engine_newPayloadV2`]: exec-engine.md#engine_newpayloadv2
+[`engine_newPayloadV3`]: exec-engine.md#engine_newpayloadv3
 
-The execution payload is an object of type [`ExecutionPayloadV2`][eth-payload].
+The execution payload is an object of type [`ExecutionPayloadV3`][eth-payload].
 
-[eth-payload]: https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#payloadattributesv2
+[eth-payload]: https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md
 
-With V2 of the execution payload, before Canyon the withdrawals field is required to be nil. After Canyon the
-withdrawals field is required to be non-nil. The op-node should set the withdrawals field to be an empty list.
+The `ExecutionPayload` has the following requirements:
+
+- Bedrock
+  - The withdrawals field MUST be nil
+  - The blob gas used field MUST be nil
+  - The blob gas limit field MUST be nil
+- Canyon, Delta
+  - The withdrawals field MUST be non-nil
+  - The withdrawals field MUST be an empty list
+  - The blob gas used field MUST be nil
+  - The blob gas limit field MUST be nil
+- Ecotone
+  - The withdrawals field MUST be non-nil
+  - The withdrawals field MUST be an empty list
+  - The blob gas used field MUST be 0
+  - The blob gas limit field MUST be 0
 
 #### Forkchoice synchronization
 
@@ -712,7 +861,7 @@ This synchronization may happen when:
 - A successful consolidation of unsafe L2 blocks: updating the "safe" L2 block.
 - The first thing after a derivation pipeline reset, to ensure a consistent execution engine forkchoice state.
 
-The new forkchoice state is applied with `engine_forkchoiceUpdatedV2`.
+The new forkchoice state is applied by calling [fork choice updated](#engine-api-usage) on the engine API.
 On forkchoice-state validity errors the derivation pipeline must be reset to recover to consistent state.
 
 #### L1-consolidation: payload attributes matching
@@ -758,11 +907,13 @@ Engine][exec-engine-comm] section.
 
 The payload attributes are then processed with a sequence of:
 
-- `engine_forkchoiceUpdatedV2` with current forkchoice state of the stage, and the attributes to start block building.
+- [Engine: Fork choice updated](#engine-api-usage) with current forkchoice state of the stage, and the attributes to
+start block building.
   - Non-deterministic sources, like the tx-pool, must be disabled to reconstruct the expected block.
-- `engine_getPayload` to retrieve the payload, by the payload-ID in the result of the previous step.
-- `engine_newPayload` to import the new payload into the execution engine.
-- `engine_forkchoiceUpdatedV2` to make the new payload canonical,
+- [Engine: Get Payload](#engine-api-usage) to retrieve the payload, by the payload-ID in the result of the previous
+step.
+- [Engine: New Payload](#engine-api-usage) to import the new payload into the execution engine.
+- [Engine: Fork Choice Updated](#engine-api-usage) to make the new payload canonical,
    now with a change of both `safe` and `unsafe` fields to refer to the payload, and no payload attributes.
 
 Engine API Error handling:
@@ -791,8 +942,12 @@ To process unsafe payloads, the payload must:
 
 The payload is then processed with a sequence of:
 
-- `engine_newPayloadV2`: process the payload. It does not become canonical yet.
-- `engine_forkchoiceUpdatedV2`: make the payload the canonical unsafe L2 head, and keep the safe/finalized L2 heads.
+- Bedrock/Canyon/Delta Payloads
+  - `engine_newPayloadV2`: process the payload. It does not become canonical yet.
+  - `engine_forkchoiceUpdatedV2`: make the payload the canonical unsafe L2 head, and keep the safe/finalized L2 heads.
+- Ecotone Payloads
+  - `engine_newPayloadV3`: process the payload. It does not become canonical yet.
+  - `engine_forkchoiceUpdatedV3`: make the payload the canonical unsafe L2 head, and keep the safe/finalized L2 heads.
 
 Engine API Error handling:
 
@@ -921,6 +1076,7 @@ Therefore, a [`PayloadAttributesV2`][expanded-payload] object must include the f
   - a single *[L1 attributes deposited transaction][g-l1-attr-deposit]*, derived from the L1 origin.
   - for the first L2 block in the epoch, zero or more *[user-deposited transactions][g-user-deposited]*, derived from
     the [receipts][g-receipts] of the L1 origin.
+- zero or more [network upgrade automation transactions]: special transactions to perform network upgrades.
 - zero or more *[sequenced transactions][g-sequencing]*: regular transactions signed by L2 users, included in the
   sequencer batch.
 
@@ -931,6 +1087,232 @@ Refer to the [**deposit contract specification**][deposit-contract-spec] for det
 entries.
 
 [deposit-contract-spec]: deposits.md#deposit-contract
+
+### Network upgrade automation transactions
+
+[network upgrade automation transactions]: #network-upgrade-automation-transactions
+
+Some network upgrades require automated contract changes or deployments at specific blocks.
+To automate these, without adding persistent changes to the execution-layer,
+special transactions may be inserted as part of the derivation process.
+
+#### Ecotone
+
+The Ecotone hardfork activation block, contains the following transactions in this order:
+
+- L1 Attributes Transaction, using the pre-Ecotone `setL1BlockValues`
+- User deposits from L1
+- Network Upgrade Transactions
+  - L1Block deployment
+  - GasPriceOracle deployment
+  - Update L1Block Proxy ERC-1967 Implementation Slot
+  - Update GasPriceOracle Proxy ERC-1967 Implementation Slot
+  - GasPriceOracle Enable Ecotone
+  - Beacon block roots contract deployment (EIP-4788)
+
+To not modify or interrupt the system behavior around gas computation, this block will not include any sequenced
+transactions by setting `noTxPool: true`.
+
+##### L1Block Deployment
+
+The `L1Block` contract is upgraded to process the new Ecotone L1-data-fee parameters and L1 blob base-fee.
+
+A deposit transaction is derived with the following attributes:
+
+- `from`: `0x4210000000000000000000000000000000000000`
+- `to`: `null`
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `300,000` (TBC)
+- `data`: L1Block deploy bytecode (TBC when PR for contracts is merged)
+- `sourceHash`: `0x877a6077205782ea15a6dc8699fa5ebcec5e0f4389f09cb8eda09488231346f8`,
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: L1 Block Deployment"
+
+This results in the Ecotone L1Block contract being deployed to `0x07dbe8500fc591d1852B76feE44d5a05e13097Ff`, to verify:
+
+```bash
+cast compute-address --nonce=0 0x4210000000000000000000000000000000000000
+Computed Address: 0x07dbe8500fc591d1852B76feE44d5a05e13097Ff
+```
+
+Verify `sourceHash`:
+
+```bash
+cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: L1 Block Deployment"))
+# 0x877a6077205782ea15a6dc8699fa5ebcec5e0f4389f09cb8eda09488231346f8
+```
+
+##### GasPriceOracle Deployment
+
+The `GasPriceOracle` contract is upgraded to support the new Ecotone L1-data-fee parameters. Post fork this contract
+will use the blob base fee to compute the gas price for L1-data-fee transactions.
+
+A deposit transaction is derived with the following attributes:
+
+- `from`: `0x4210000000000000000000000000000000000001`
+- `to`: `null`,
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `500,000` (TBC)
+- `data`: GasPriceOracle deploy bytecode (TBC when PR for contracts is merged)
+- `sourceHash`: `0xa312b4510adf943510f05fcc8f15f86995a5066bd83ce11384688ae20e6ecf42`
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: Gas Price Oracle Deployment"
+
+This results in the Ecotone GasPriceOracle contract being deployed to `0xb528D11cC114E026F138fE568744c6D45ce6Da7A`,
+to verify:
+
+```bash
+cast compute-address --nonce=0 0x4210000000000000000000000000000000000001
+Computed Address: 0xb528D11cC114E026F138fE568744c6D45ce6Da7A
+```
+
+Verify `sourceHash`:
+
+```bash
+❯ cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: Gas Price Oracle Deployment"))
+# 0xa312b4510adf943510f05fcc8f15f86995a5066bd83ce11384688ae20e6ecf42
+```
+
+##### L1Block Proxy Update
+
+This transaction updates the L1Block Proxy ERC-1967 implementation slot to point to the new L1Block deployment.
+
+A deposit transaction is derived with the following attributes:
+
+- `from`: `0x0000000000000000000000000000000000000000`
+- `to`: `0x4200000000000000000000000000000000000015` (L1Block Proxy)
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `200,000` (TBC)
+- `data`: `0x3659cfe600000000000000000000000007dbe8500fc591d1852b76fee44d5a05e13097ff`
+- `sourceHash`: `0x18acb38c5ff1c238a7460ebc1b421fa49ec4874bdf1e0a530d234104e5e67dbc`
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: L1 Block Proxy Update"
+
+Verify data:
+
+```bash
+cast concat-hex $(cast sig "upgradeTo(address)") $(cast abi-encode "upgradeTo(address)" 0x07dbe8500fc591d1852B76feE44d5a05e13097Ff)
+0x3659cfe600000000000000000000000007dbe8500fc591d1852b76fee44d5a05e13097ff
+```
+
+Verify `sourceHash`:
+
+```bash
+cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: L1 Block Proxy Update"))
+# 0x18acb38c5ff1c238a7460ebc1b421fa49ec4874bdf1e0a530d234104e5e67dbc
+```
+
+##### GasPriceOracle Proxy Update
+
+This transaction updates the GasPriceOracle Proxy ERC-1967 implementation slot to point to the new GasPriceOracle
+deployment.
+
+A deposit transaction is derived with the following attributes:
+
+- `from`: `0x0000000000000000000000000000000000000000`
+- `to`: `0x420000000000000000000000000000000000000F` (Gas Price Oracle Proxy)
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `200,000` (TBC)
+- `data`: `0x3659cfe6000000000000000000000000b528d11cc114e026f138fe568744c6d45ce6da7a`
+- `sourceHash`: `0xee4f9385eceef498af0be7ec5862229f426dec41c8d42397c7257a5117d9230a`
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: Gas Price Oracle Proxy Update"`
+
+Verify data:
+
+```bash
+cast concat-hex $(cast sig "upgradeTo(address)") $(cast abi-encode "upgradeTo(address)" 0xb528D11cC114E026F138fE568744c6D45ce6Da7A)
+0x3659cfe6000000000000000000000000b528d11cc114e026f138fe568744c6d45ce6da7a
+```
+
+Verify `sourceHash`:
+
+```bash
+cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: Gas Price Oracle Proxy Update"))
+# 0xee4f9385eceef498af0be7ec5862229f426dec41c8d42397c7257a5117d9230a
+```
+
+##### GasPriceOracle Enable Ecotone
+
+This transaction informs the GasPriceOracle to start using the Ecotone gas calculation formula.
+
+A deposit transaction is derived with the following attributes:
+
+- `from`: `0xDeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001` (Depositer Account)
+- `to`: `0x420000000000000000000000000000000000000F` (Gas Price Oracle Proxy)
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `1,000,000` (TBC)
+- `data`: `0x22b90ab3`
+- `sourceHash`: `0x0c1cb38e99dbc9cbfab3bb80863380b0905290b37eb3d6ab18dc01c1f3e75f93`,
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: Gas Price Oracle Set Ecotone"
+
+Verify data:
+
+```bash
+cast sig "setEcotone()"
+0x22b90ab3
+```
+
+Verify `sourceHash`:
+
+```bash
+cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: Gas Price Oracle Set Ecotone"))
+# 0x0c1cb38e99dbc9cbfab3bb80863380b0905290b37eb3d6ab18dc01c1f3e75f93
+```
+
+##### Beacon block roots contract deployment (EIP-4788)
+
+[EIP-4788] introduces a "Beacon block roots" contract, that processes and exposes the beacon-block-root values.
+at address `BEACON_ROOTS_ADDRESS = 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02`.
+
+For deployment, [EIP-4788] defines a pre-[EIP-155] legacy transaction, sent from a key that is derived such that the
+transaction signature validity is bound to message-hash, which is bound to the input-data, containing the init-code.
+
+However, this type of transaction requires manual deployment and gas-payments.
+And since the processing is an integral part of the chain processing, and has to be repeated for every OP-Stack chain,
+the deployment is approached differently here.
+
+Some chains may already have a user-submitted instance of the [EIP-4788] transaction.
+This is cryptographically guaranteed to be correct, but may result in the upgrade transaction
+deploying a second contract, with the next nonce. The result of this deployment can be ignored.
+
+A Deposit transaction is derived with the following attributes:
+
+- `from`: `0x0B799C86a49DEeb90402691F1041aa3AF2d3C875`, as specified in the EIP.
+- `to`: null
+- `mint`: `0`
+- `value`: `0`
+- `gasLimit`: `0x3d090`, as specified in the EIP.
+- `isCreation`: `true`
+- `data`:
+  `0x60618060095f395ff33373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500`
+- `isSystemTx`: `false`, as per the Regolith upgrade, even the system-generated transactions spend gas.
+- `sourceHash`: `0x69b763c48478b9dc2f65ada09b3d92133ec592ea715ec65ad6e7f3dc519dc00c`,
+  computed with the "Upgrade-deposited" type, with `intent = "Ecotone: beacon block roots contract deployment"`
+
+The contract address upon deployment is computed as `rlp([sender, nonce])`, which will equal:
+
+- `BEACON_ROOTS_ADDRESS` if deployed
+- a different address (`0xE3aE1Ae551eeEda337c0BfF6C4c7cbA98dce353B`) if `nonce = 1`:
+  when a user already submitted the EIP transaction before the upgrade.
+
+Verify `BEACON_ROOTS_ADDRESS`:
+
+```bash
+cast compute-address --nonce=0 0x0B799C86a49DEeb90402691F1041aa3AF2d3C875
+# Computed Address: 0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02
+```
+
+Verify `sourceHash`:
+
+```bash
+cast keccak $(cast concat-hex 0x0000000000000000000000000000000000000000000000000000000000000002 $(cast keccak "Ecotone: beacon block roots contract deployment"))
+# 0x69b763c48478b9dc2f65ada09b3d92133ec592ea715ec65ad6e7f3dc519dc00c
+```
+
+[EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
+[EIP-155]: https://eips.ethereum.org/EIPS/eip-155
 
 ## Building Individual Payload Attributes
 

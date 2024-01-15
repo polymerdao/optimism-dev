@@ -60,10 +60,7 @@ contract StandardBridge_Stateless_Test is CommonTest {
     function setUp() public override {
         super.setUp();
 
-        bridge = new StandardBridgeTester({
-            _messenger: payable(address(0)),
-            _otherBridge: payable(address(0))
-        });
+        bridge = new StandardBridgeTester({ _messenger: payable(address(0)), _otherBridge: payable(address(0)) });
 
         mintable = new OptimismMintableERC20({
             _bridge: address(0),
@@ -111,5 +108,10 @@ contract StandardBridge_Stateless_Test is CommonTest {
         // will revert
         vm.expectRevert();
         bridge.isCorrectTokenPair(address(erc20), address(1));
+    }
+
+    /// @notice The bridge by default should be unpaused.
+    function test_paused_succeeds() external {
+        assertFalse(bridge.paused());
     }
 }

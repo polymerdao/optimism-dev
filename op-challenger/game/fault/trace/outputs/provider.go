@@ -27,33 +27,36 @@ type OutputRollupClient interface {
 // OutputTraceProvider is a [types.TraceProvider] implementation that uses
 // output roots for given L2 Blocks as a trace.
 type OutputTraceProvider struct {
+	types.PrestateProvider
 	logger         log.Logger
 	rollupClient   OutputRollupClient
 	prestateBlock  uint64
 	poststateBlock uint64
-	gameDepth      uint64
+	gameDepth      types.Depth
 }
 
-func NewTraceProvider(ctx context.Context, logger log.Logger, rollupRpc string, gameDepth, prestateBlock, poststateBlock uint64) (*OutputTraceProvider, error) {
+func NewTraceProvider(ctx context.Context, logger log.Logger, rollupRpc string, gameDepth types.Depth, prestateBlock, poststateBlock uint64) (*OutputTraceProvider, error) {
 	rollupClient, err := dial.DialRollupClientWithTimeout(ctx, dial.DefaultDialTimeout, logger, rollupRpc)
 	if err != nil {
 		return nil, err
 	}
-	return NewTraceProviderFromInputs(logger, rollupClient, gameDepth, prestateBlock, poststateBlock), nil
+	prestateProvider := NewPrestateProvider(ctx, logger, rollupClient, prestateBlock)
+	return NewTraceProviderFromInputs(logger, prestateProvider, rollupClient, gameDepth, prestateBlock, poststateBlock), nil
 }
 
-func NewTraceProviderFromInputs(logger log.Logger, rollupClient OutputRollupClient, gameDepth, prestateBlock, poststateBlock uint64) *OutputTraceProvider {
+func NewTraceProviderFromInputs(logger log.Logger, prestateProvider types.PrestateProvider, rollupClient OutputRollupClient, gameDepth types.Depth, prestateBlock, poststateBlock uint64) *OutputTraceProvider {
 	return &OutputTraceProvider{
-		logger:         logger,
-		rollupClient:   rollupClient,
-		prestateBlock:  prestateBlock,
-		poststateBlock: poststateBlock,
-		gameDepth:      gameDepth,
+		PrestateProvider: prestateProvider,
+		logger:           logger,
+		rollupClient:     rollupClient,
+		prestateBlock:    prestateBlock,
+		poststateBlock:   poststateBlock,
+		gameDepth:        gameDepth,
 	}
 }
 
 func (o *OutputTraceProvider) BlockNumber(pos types.Position) (uint64, error) {
-	traceIndex := pos.TraceIndex(int(o.gameDepth))
+	traceIndex := pos.TraceIndex(o.gameDepth)
 	if !traceIndex.IsUint64() {
 		return 0, fmt.Errorf("%w: %v", ErrIndexTooBig, traceIndex)
 	}
@@ -70,11 +73,6 @@ func (o *OutputTraceProvider) Get(ctx context.Context, pos types.Position) (comm
 		return common.Hash{}, err
 	}
 	return o.outputAtBlock(ctx, outputBlock)
-}
-
-// AbsolutePreStateCommitment returns the absolute prestate at the configured prestateBlock.
-func (o *OutputTraceProvider) AbsolutePreStateCommitment(ctx context.Context) (hash common.Hash, err error) {
-	return o.outputAtBlock(ctx, o.prestateBlock)
 }
 
 // GetStepData is not supported in the [OutputTraceProvider].

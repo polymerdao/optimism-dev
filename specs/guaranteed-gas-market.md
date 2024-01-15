@@ -12,7 +12,7 @@
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
-[Deposited transaction](./glossary.md#deposited-transaction) are transactions on L2 that are
+[Deposited transactions](./glossary.md#deposited-transaction) are transactions on L2 that are
 initiated on L1. The gas that they use on L2 is bought on L1 via a gas burn (or a direct payment
 in the future). We maintain a fee market and hard cap on the amount of gas provided to all deposits
 in a single L1 block.
@@ -26,28 +26,29 @@ to purchase (on L1) on top of that.
 
 Guaranteed gas on L2 is bought in the following manner. An L2 gas price is calculated via an
 EIP-1559-style algorithm. The total amount of ETH required to buy that gas is then calculated as
-(`guaranteed gas * L2 deposit basefee`). The contract then accepts that amount of ETH (in a future
-upgrade) or (only method right now), burns an amount of L1 gas that corresponds to the L2 cost
-(`L2 cost / L1 Basefee`). The L2 gas price for guaranteed gas is not synchronized with the basefee
-on L2 and will likely be different.
+(`guaranteed gas * L2 deposit base fee`). The contract then accepts that amount of ETH (in a future
+upgrade) or (only method right now), burns an amount of L1 gas that corresponds to the L2 cost (`L2
+cost / L1 base fee`). The L2 gas price for guaranteed gas is not synchronized with the base fee on
+L2 and will likely be different.
 
 ## Gas Stipend
 
-To offset the gas spent on the deposit event, we credit `gas spent * L1 basefee` ETH to the cost of
-the L2 gas, where `gas spent` is the amount of L1 gas spent processing the deposit. If the ETH value
-of this credit is greater than the ETH value of the requested guaranteed gas
-(`requested guaranteed gas * L2 gas price`), no L1 gas is burnt.
+To offset the gas spent on the deposit event, we credit `gas spent * L1 base fee` ETH to the cost
+of the L2 gas, where `gas spent` is the amount of L1 gas spent processing the deposit. If the ETH
+value of this credit is greater than the ETH value of the requested guaranteed gas (`requested
+guaranteed gas * L2 gas price`), no L1 gas is burnt.
 
 ## Default Values
 
-| Variable                        | Value             |
-| ------------------------------- | ----------------- |
-| Max Resource Limit              | 20,000,000        |
-| Elasticity Multiplier           | 10                |
-| Base Fee Max Change Denominator | 8                 |
-| Minimum Base Fee                | 1 gwei            |
-| Maximum Base Fee                | type(uint128).max |
-| System Tx Max Gas               | 1,000,000         |
+| Variable                          | Value                                          |
+| --------------------------------- | ---------------------------------------------- |
+| `MAX_RESOURCE_LIMIT`              | 20,000,000                                     |
+| `ELASTICITY_MULTIPLIER`           | 10                                             |
+| `BASE_FEE_MAX_CHANGE_DENOMINATOR` | 8                                              |
+| `MINIMUM_BASE_FEE`                | 1 gwei                                         |
+| `MAXIMUM_BASE_FEE`                | type(uint128).max                              |
+| `SYSTEM_TX_MAX_GAS`               | 1,000,000                                      |
+| `TARGET_RESOURCE_LIMIT`           | `MAX_RESOURCE_LIMIT` / `ELASTICITY_MULTIPLIER` |
 
 ## Limiting Guaranteed Gas
 
@@ -55,31 +56,26 @@ The total amount of guaranteed gas that can be bought in a single L1 block must 
 prevent a denial of service attack against L2 as well as ensure the total amount of guaranteed gas
 stays below the L2 block gas limit.
 
-We set a guaranteed gas limit of 8,000,000 gas per L1 block and a target of 2,000,000 gas per L1
-block. These numbers enabled occasional large transactions while staying within our target and
-maximum gas usage on L2.
+We set a guaranteed gas limit of `MAX_RESOURCE_LIMIT` gas per L1 block and a target of
+`MAX_RESOURCE_LIMIT` / `ELASTICITY_MULTIPLIER` gas per L1 block. These numbers enabled
+occasional large transactions while staying within our target and maximum gas usage on L2.
 
 Because the amount of guaranteed L2 gas that can be purchased in a single block is now limited,
 we implement an EIP-1559-style fee market to reduce congestion on deposits. By setting the limit
 at a multiple of the target, we enable deposits to temporarily use more L2 gas at a greater cost.
 
 ```python
-# Pseudocode to update the L2 Deposit Basefee and cap the amount of guaranteed gas
+# Pseudocode to update the L2 deposit base fee and cap the amount of guaranteed gas
 # bought in a block. Calling code must handle the gas burn and validity checks on
 # the ability of the account to afford this gas.
-BASE_FEE_MAX_CHANGE_DENOMINATOR = 8
-ELASTICITY_MULTIPLIER = 4
-MAX_RESOURCE_LIMIT = 8_000_000
-TARGET_RESOURCE_LIMIT = MAX_RESOURCE_LIMIT / ELASTICITY_MULTIPLIER
-MINIMUM_BASEFEE = 10000
 
-# prev_basefee is a u128, prev_bought_gas and prev_num are u64s
-prev_basefee, prev_bought_gas, prev_num = <values from previous update>
+# prev_base fee is a u128, prev_bought_gas and prev_num are u64s
+prev_base_fee, prev_bought_gas, prev_num = <values from previous update>
 now_num = block.number
 
-# Clamp the full basefee to a specific range. The minimum value in the range should be around 100-1000
-# to enable faster responses in the basefee. This replaces the `max` mechanism in the ethereum 1559
-# implementation (it also serves to enable the basefee to increase if it is very small).
+# Clamp the full base fee to a specific range. The minimum value in the range should be around 100-1000
+# to enable faster responses in the base fee. This replaces the `max` mechanism in the ethereum 1559
+# implementation (it also serves to enable the base fee to increase if it is very small).
 def clamp(v: i256, min: u128, max: u128) -> u128:
     if v < i256(min):
         return min
@@ -88,35 +84,35 @@ def clamp(v: i256, min: u128, max: u128) -> u128:
     else:
         return u128(v)
 
-# If this is a new block, update the basefee and reset the total gas
+# If this is a new block, update the base fee and reset the total gas
 # If not, just update the total gas
 if prev_num == now_num:
-    now_basefee = prev_basefee
+    now_base_fee = prev_base_fee
     now_bought_gas = prev_bought_gas + requested_gas
 elif prev_num != now_num:
     # Width extension and conversion to signed integer math
     gas_used_delta = int128(prev_bought_gas) - int128(TARGET_RESOURCE_LIMIT)
     # Use truncating (round to 0) division - solidity's default.
-    # Sign extend gas_used_delta & prev_basefee to 256 bits to avoid overflows here.
-    base_fee_per_gas_delta = prev_basefee * gas_used_delta / TARGET_RESOURCE_LIMIT / BASE_FEE_MAX_CHANGE_DENOMINATOR
-    now_basefee_wide = prev_basefee + base_fee_per_gas_delta
+    # Sign extend gas_used_delta & prev_base_fee to 256 bits to avoid overflows here.
+    base_fee_per_gas_delta = prev_base_fee * gas_used_delta / TARGET_RESOURCE_LIMIT / BASE_FEE_MAX_CHANGE_DENOMINATOR
+    now_base_fee_wide = prev_base_fee + base_fee_per_gas_delta
 
-    now_basefee = clamp(now_basefee_wide, min=MINIMUM_BASEFEE, max=UINT_128_MAX_VALUE)
+    now_base_fee = clamp(now_base_fee_wide, min=MINIMUM_BASE_FEE, max=UINT_128_MAX_VALUE)
     now_bought_gas =  requested_gas
 
-    # If we skipped multiple blocks between the previous block and now update the basefee again.
+    # If we skipped multiple blocks between the previous block and now update the base fee again.
     # This is not exactly the same as iterating the above function, but quite close for reasonable
     # gas target values. It is also constant time wrt the number of missed blocks which is important
     # for keeping gas usage stable.
     if prev_num + 1 < now_num:
         n = now_num - prev_num - 1
-        # Apply 7/8 reduction to prev_basefee for the n empty blocks in a row.
-        now_basefee_wide = now_basefee * pow(1-(1/BASE_FEE_MAX_CHANGE_DENOMINATOR), n)
-        now_basefee = clamp(now_basefee_wide, min=MINIMUM_BASEFEE, max=type(uint128).max)
+        # Apply 7/8 reduction to prev_base_fee for the n empty blocks in a row.
+        now_base_fee_wide = now_base_fee * pow(1-(1/BASE_FEE_MAX_CHANGE_DENOMINATOR), n)
+        now_base_fee = clamp(now_base_fee_wide, min=MINIMUM_BASE_FEE, max=type(uint128).max)
 
 require(now_bought_gas < MAX_RESOURCE_LIMIT)
 
-store_values(now_basefee, now_bought_gas, now_num)
+store_values(now_base_fee, now_bought_gas, now_num)
 ```
 
 ## Rationale for burning L1 Gas
@@ -145,7 +141,7 @@ An attacker would observe a deposit in the mempool and frontrun it with a deposi
 that purchases enough gas such that the other deposit reverts.
 The smaller the max resource limit is, the easier this attack is to pull off.
 This attack is mitigated by having a large resource limit as well as a large
-elastcity multiplier. This means that the target resource usage is kept small,
+elasticity multiplier. This means that the target resource usage is kept small,
 giving a lot of room for the deposit base fee to rise when the max resource limit
 is being purchased.
 

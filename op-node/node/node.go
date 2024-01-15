@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 
 	"github.com/hashicorp/go-multierror"
@@ -18,17 +17,21 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 
-	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/heartbeat"
 	"github.com/ethereum-optimism/optimism/op-node/metrics"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	"github.com/ethereum-optimism/optimism/op-node/version"
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
-	oppprof "github.com/ethereum-optimism/optimism/op-service/pprof"
+	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum-optimism/optimism/op-service/retry"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
+)
+
+var (
+	ErrAlreadyClosed = errors.New("node is already closed")
 )
 
 type OpNode struct {
@@ -43,18 +46,19 @@ type OpNode struct {
 	l1Source  *sources.L1Client     // L1 Client to fetch data from
 	l2Driver  *driver.Driver        // L2 Engine to Sync
 	l2Source  *sources.EngineClient // L2 Execution Engine RPC bindings
-	rpcSync   *sources.SyncClient   // Alt-sync RPC client, optional (may be nil)
 	server    *rpcServer            // RPC server hosting the rollup-node API
 	p2pNode   *p2p.NodeP2P          // P2P node functionality
 	p2pSigner p2p.Signer            // p2p gogssip application messages will be signed with this signer
 	tracer    Tracer                // tracer to get events for testing/debugging
 	runCfg    *RuntimeConfig        // runtime configurables
-	daCfg     *da.DAConfig          // EigenDA client and configuration
+	daCfg     *eigenda.Config       // EigenDA client and configuration
 
 	rollupHalt string // when to halt the rollup, disabled if empty
 
-	pprofSrv   *httputil.HTTPServer
-	metricsSrv *httputil.HTTPServer
+	pprofService *oppprof.Service
+	metricsSrv   *httputil.HTTPServer
+
+	beacon *sources.L1BeaconClient
 
 	// some resources cannot be stopped directly, like the p2p gossipsub router (not our design),
 	// and depend on this ctx to be closed.
@@ -106,23 +110,20 @@ func New(ctx context.Context, cfg *Config, log log.Logger, snapshotLog log.Logge
 
 func (n *OpNode) init(ctx context.Context, cfg *Config, snapshotLog log.Logger) error {
 	n.log.Info("Initializing rollup node", "version", n.appVersion)
-	if err := n.initDA(ctx, cfg); err != nil {
-		return err
-	}
 	if err := n.initTracer(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init the trace: %w", err)
 	}
 	if err := n.initL1(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init L1: %w", err)
 	}
+	if err := n.initL1BeaconAPI(ctx, cfg); err != nil {
+		return err
+	}
 	if err := n.initL2(ctx, cfg, snapshotLog); err != nil {
 		return fmt.Errorf("failed to init L2: %w", err)
 	}
 	if err := n.initRuntimeConfig(ctx, cfg); err != nil { // depends on L2, to signal initial runtime values to
 		return fmt.Errorf("failed to init the runtime config: %w", err)
-	}
-	if err := n.initRPCSync(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to init RPC sync: %w", err)
 	}
 	if err := n.initP2PSigner(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init the P2P signer: %w", err)
@@ -141,14 +142,9 @@ func (n *OpNode) init(ctx context.Context, cfg *Config, snapshotLog log.Logger) 
 	n.metrics.RecordUp()
 	n.initHeartbeat(cfg)
 	if err := n.initPProf(cfg); err != nil {
-		return fmt.Errorf("failed to init pprof server: %w", err)
+		return fmt.Errorf("failed to init profiling: %w", err)
 	}
-	n.daCfg = &cfg.DAConfig
-	return nil
-}
-
-func (n *OpNode) initDA(ctx context.Context, cfg *Config) error {
-	n.daCfg = &cfg.DAConfig
+	n.daCfg = &cfg.DA
 	return nil
 }
 
@@ -298,6 +294,22 @@ func (n *OpNode) initRuntimeConfig(ctx context.Context, cfg *Config) error {
 	return nil
 }
 
+func (n *OpNode) initL1BeaconAPI(ctx context.Context, cfg *Config) error {
+	if cfg.Beacon == nil {
+		n.log.Warn("No beacon endpoint configured. Configuration is mandatory for the Ecotone upgrade")
+		return nil
+	}
+	httpClient, err := cfg.Beacon.Setup(ctx, n.log)
+	if err != nil {
+		return fmt.Errorf("failed to setup L1 beacon client: %w", err)
+	}
+
+	cl := sources.NewL1BeaconClient(httpClient)
+	n.beacon = cl
+
+	return nil
+}
+
 func (n *OpNode) initL2(ctx context.Context, cfg *Config, snapshotLog log.Logger) error {
 	rpcClient, rpcCfg, err := cfg.L2.Setup(ctx, n.log, &cfg.Rollup)
 	if err != nil {
@@ -315,24 +327,8 @@ func (n *OpNode) initL2(ctx context.Context, cfg *Config, snapshotLog log.Logger
 		return err
 	}
 
-	n.l2Driver = driver.NewDriver(&cfg.Driver, &cfg.Rollup, n.daCfg, n.l2Source, n.l1Source, n, n, n.log, snapshotLog, n.metrics, cfg.ConfigPersistence, &cfg.Sync)
+	n.l2Driver = driver.NewDriver(&cfg.Driver, &cfg.Rollup, n.l2Source, n.l1Source, n.beacon, n, n, n.log, snapshotLog, n.metrics, cfg.ConfigPersistence, &cfg.Sync, &cfg.DA)
 
-	return nil
-}
-
-func (n *OpNode) initRPCSync(ctx context.Context, cfg *Config) error {
-	rpcSyncClient, rpcCfg, err := cfg.L2Sync.Setup(ctx, n.log, &cfg.Rollup)
-	if err != nil {
-		return fmt.Errorf("failed to setup L2 execution-engine RPC client for backup sync: %w", err)
-	}
-	if rpcSyncClient == nil { // if no RPC client is configured to sync from, then don't add the RPC sync client
-		return nil
-	}
-	syncClient, err := sources.NewSyncClient(n.OnUnsafeL2Payload, rpcSyncClient, n.log, n.metrics.L2SourceCache, rpcCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create sync client: %w", err)
-	}
-	n.rpcSync = syncClient
 	return nil
 }
 
@@ -398,22 +394,25 @@ func (n *OpNode) initHeartbeat(cfg *Config) {
 }
 
 func (n *OpNode) initPProf(cfg *Config) error {
-	if !cfg.Pprof.Enabled {
-		return nil
+	n.pprofService = oppprof.New(
+		cfg.Pprof.ListenEnabled,
+		cfg.Pprof.ListenAddr,
+		cfg.Pprof.ListenPort,
+		cfg.Pprof.ProfileType,
+		cfg.Pprof.ProfileDir,
+		cfg.Pprof.ProfileFilename,
+	)
+
+	if err := n.pprofService.Start(); err != nil {
+		return fmt.Errorf("failed to start pprof service: %w", err)
 	}
-	log.Debug("starting pprof server", "addr", net.JoinHostPort(cfg.Pprof.ListenAddr, strconv.Itoa(cfg.Pprof.ListenPort)))
-	srv, err := oppprof.StartServer(cfg.Pprof.ListenAddr, cfg.Pprof.ListenPort)
-	if err != nil {
-		return err
-	}
-	n.pprofSrv = srv
-	log.Info("started pprof server", "addr", srv.Addr())
+
 	return nil
 }
 
 func (n *OpNode) initP2P(ctx context.Context, cfg *Config) error {
 	if cfg.P2P != nil {
-		p2pNode, err := p2p.NewNodeP2P(n.resourcesCtx, &cfg.Rollup, n.log, cfg.P2P, n, n.l2Source, n.runCfg, n.metrics)
+		p2pNode, err := p2p.NewNodeP2P(n.resourcesCtx, &cfg.Rollup, n.log, cfg.P2P, n, n.l2Source, n.runCfg, n.metrics, cfg.Sync.SyncMode == sync.ELSync)
 		if err != nil || p2pNode == nil {
 			return err
 		}
@@ -438,22 +437,11 @@ func (n *OpNode) initP2PSigner(ctx context.Context, cfg *Config) error {
 
 func (n *OpNode) Start(ctx context.Context) error {
 	n.log.Info("Starting execution engine driver")
-
 	// start driving engine: sync blocks by deriving them from L1 and driving them into the engine
 	if err := n.l2Driver.Start(); err != nil {
 		n.log.Error("Could not start a rollup node", "err", err)
 		return err
 	}
-
-	// If the backup unsafe sync client is enabled, start its event loop
-	if n.rpcSync != nil {
-		if err := n.rpcSync.Start(); err != nil {
-			n.log.Error("Could not start the backup sync client", "err", err)
-			return err
-		}
-		n.log.Info("Started L2-RPC sync service")
-	}
-
 	log.Info("Rollup node started")
 	return nil
 }
@@ -533,9 +521,6 @@ func (n *OpNode) OnUnsafeL2Payload(ctx context.Context, from peer.ID, payload *e
 }
 
 func (n *OpNode) RequestL2Range(ctx context.Context, start, end eth.L2BlockRef) error {
-	if n.rpcSync != nil {
-		return n.rpcSync.RequestL2Range(ctx, start, end)
-	}
 	if n.p2pNode != nil && n.p2pNode.AltSyncEnabled() {
 		if unixTimeStale(start.Time, 12*time.Hour) {
 			n.log.Debug("ignoring request to sync L2 range, timestamp is too old for p2p", "start", start, "end", end, "start_time", start.Time)
@@ -564,7 +549,7 @@ func (n *OpNode) RuntimeConfig() ReadonlyRuntimeConfig {
 // If the provided ctx is expired, the node will accelerate the stop where possible, but still fully close.
 func (n *OpNode) Stop(ctx context.Context) error {
 	if n.closed.Load() {
-		return errors.New("node is already closed")
+		return ErrAlreadyClosed
 	}
 
 	var result *multierror.Error
@@ -607,13 +592,6 @@ func (n *OpNode) Stop(ctx context.Context) error {
 		if err := n.l2Driver.Close(); err != nil {
 			result = multierror.Append(result, fmt.Errorf("failed to close L2 engine driver cleanly: %w", err))
 		}
-
-		// If the L2 sync client is present & running, close it.
-		if n.rpcSync != nil {
-			if err := n.rpcSync.Close(); err != nil {
-				result = multierror.Append(result, fmt.Errorf("failed to close L2 engine backup sync client cleanly: %w", err))
-			}
-		}
 	}
 
 	// Wait for the runtime config loader to be done using the data sources before closing them
@@ -647,8 +625,8 @@ func (n *OpNode) Stop(ctx context.Context) error {
 	}
 
 	// Close metrics and pprof only after we are done idling
-	if n.pprofSrv != nil {
-		if err := n.pprofSrv.Stop(ctx); err != nil {
+	if n.pprofService != nil {
+		if err := n.pprofService.Stop(ctx); err != nil {
 			result = multierror.Append(result, fmt.Errorf("failed to close pprof server: %w", err))
 		}
 	}

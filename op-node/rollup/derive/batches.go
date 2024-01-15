@@ -187,7 +187,7 @@ func checkSpanBatch(ctx context.Context, cfg *rollup.Config, log log.Logger, l1B
 		batchOrigin = l1Blocks[1]
 	}
 	if !cfg.IsDelta(batchOrigin.Time) {
-		log.Warn("received SpanBatch with L1 origin before Delta hard fork")
+		log.Warn("received SpanBatch with L1 origin before Delta hard fork", "l1_origin", batchOrigin.ID(), "l1_origin_time", batchOrigin.Time)
 		return BatchDrop
 	}
 
@@ -363,7 +363,7 @@ func checkSpanBatch(ctx context.Context, cfg *rollup.Config, log log.Logger, l1B
 					return BatchDrop
 				}
 			}
-			safeBlockRef, err := PayloadToBlockRef(safeBlockPayload, &cfg.Genesis)
+			safeBlockRef, err := PayloadToBlockRef(cfg, safeBlockPayload)
 			if err != nil {
 				log.Error("failed to extract L2BlockRef from execution payload", "hash", safeBlockPayload.BlockHash, "err", err)
 				return BatchDrop

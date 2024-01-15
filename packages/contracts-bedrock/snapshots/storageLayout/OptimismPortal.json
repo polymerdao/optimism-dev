@@ -1,65 +1,65 @@
 [
   {
     "bytes": "1",
-    "label": "uint8",
+    "label": "_initialized",
     "offset": 0,
     "slot": "0",
-    "type": "t_uint8"
+    "type": "uint8"
   },
   {
     "bytes": "1",
-    "label": "bool",
+    "label": "_initializing",
     "offset": 1,
     "slot": "0",
-    "type": "t_bool"
+    "type": "bool"
   },
   {
     "bytes": "32",
-    "label": "struct ResourceMetering.ResourceParams",
+    "label": "params",
     "offset": 0,
     "slot": "1",
-    "type": "t_struct(ResourceParams)3420_storage"
+    "type": "struct ResourceMetering.ResourceParams"
   },
   {
     "bytes": "1536",
-    "label": "uint256[48]",
+    "label": "__gap",
     "offset": 0,
     "slot": "2",
-    "type": "t_array(t_uint256)48_storage"
+    "type": "uint256[48]"
   },
   {
     "bytes": "20",
-    "label": "address",
+    "label": "l2Sender",
     "offset": 0,
     "slot": "50",
-    "type": "t_address"
+    "type": "address"
   },
   {
     "bytes": "32",
-    "label": "mapping(bytes32 => bool)",
+    "label": "finalizedWithdrawals",
     "offset": 0,
     "slot": "51",
-    "type": "t_mapping(t_bytes32,t_bool)"
+    "type": "mapping(bytes32 => bool)"
   },
   {
     "bytes": "32",
-    "label": "mapping(bytes32 => struct OptimismPortal.ProvenWithdrawal)",
+    "label": "provenWithdrawals",
     "offset": 0,
     "slot": "52",
-    "type": "t_mapping(t_bytes32,t_struct(ProvenWithdrawal)2750_storage)"
+    "type": "mapping(bytes32 => struct OptimismPortal.ProvenWithdrawal)"
   },
   {
     "bytes": "1",
-    "label": "bool",
+    "label": "spacer_53_0_1",
     "offset": 0,
     "slot": "53",
-    "type": "t_bool"
+    "type": "bool"
   },
   {
     "bytes": "20",
-    "label": "contract SuperchainConfig",
+    "label": "superchainConfig",
     "offset": 1,
     "slot": "53",
-    "type": "t_contract(SuperchainConfig)3943"
+    "type": "contract SuperchainConfig"
   }
 ]

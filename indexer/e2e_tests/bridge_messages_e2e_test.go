@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 
 	"github.com/stretchr/testify/require"
@@ -66,7 +67,7 @@ func TestE2EBridgeL1CrossDomainMessenger(t *testing.T) {
 	require.Equal(t, aliceAddr, sentMessage.Tx.ToAddress)
 	require.ElementsMatch(t, calldata, sentMessage.Tx.Data)
 
-	// (2) Process RelayedMesssage on inclusion
+	// (2) Process RelayedMessage on inclusion
 	//   - We dont assert that `RelayedMessageEventGUID` is nil prior to inclusion since there isn't a
 	//   a straightforward way of pausing/resuming the processors at the right time. The codepath is the
 	//   same for L2->L1 messages which does check for this so we are still covered
@@ -114,7 +115,12 @@ func TestE2EBridgeL2CrossDomainMessenger(t *testing.T) {
 	l1Opts.Value = l2Opts.Value
 	depositTx, err := optimismPortal.Receive(l1Opts)
 	require.NoError(t, err)
-	_, err = wait.ForReceiptOK(context.Background(), testSuite.L1Client, depositTx.Hash())
+	depositReceipt, err := wait.ForReceiptOK(context.Background(), testSuite.L1Client, depositTx.Hash())
+	require.NoError(t, err)
+	depositInfo, err := e2etest_utils.ParseDepositInfo(depositReceipt)
+	require.NoError(t, err)
+	depositL2TxHash := types.NewTx(depositInfo.DepositTx).Hash()
+	_, err = wait.ForReceiptOK(context.Background(), testSuite.L2Client, depositL2TxHash)
 	require.NoError(t, err)
 
 	// (1) Send the Message
@@ -155,7 +161,7 @@ func TestE2EBridgeL2CrossDomainMessenger(t *testing.T) {
 
 	// (2) Process RelayedMessage on withdrawal finalization
 	require.Nil(t, sentMessage.RelayedMessageEventGUID)
-	_, finalizedReceipt := op_e2e.ProveAndFinalizeWithdrawal(t, *testSuite.OpCfg, testSuite.L1Client, testSuite.OpSys.EthInstances["sequencer"], testSuite.OpCfg.Secrets.Alice, sentMsgReceipt)
+	_, finalizedReceipt := op_e2e.ProveAndFinalizeWithdrawal(t, *testSuite.OpCfg, testSuite.OpSys, "sequencer", testSuite.OpCfg.Secrets.Alice, sentMsgReceipt)
 
 	// wait for processor catchup
 	require.NoError(t, wait.For(context.Background(), 500*time.Millisecond, func() (bool, error) {

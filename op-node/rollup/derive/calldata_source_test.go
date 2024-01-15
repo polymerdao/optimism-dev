@@ -10,7 +10,6 @@ import (
 
 	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -18,8 +17,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 
-	"github.com/ethereum-optimism/optimism/op-node/da"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/testlog"
 	"github.com/ethereum-optimism/optimism/op-service/testutils"
@@ -54,14 +53,14 @@ type calldataTest struct {
 	txs  []testTx
 }
 
-var _ disperser.DisperserClient = &DisperserClientMock{}
+var _ eigenda.IEigenDA = &EigenDAClientMock{}
 
-type DisperserClientMock struct {
-	Responses     []*disperser.RetrieveBlobReply
+type EigenDAClientMock struct {
+	Responses     [][]byte
 	ResponseIndex int
 }
 
-func (c *DisperserClientMock) RetrieveBlob(ctx context.Context, in *disperser.RetrieveBlobRequest, opts ...grpc.CallOption) (*disperser.RetrieveBlobReply, error) {
+func (c *EigenDAClientMock) RetrieveBlob(ctx context.Context, BatchHeaderHash []byte, BlobIndex uint32) ([]byte, error) {
 	if c.ResponseIndex < len(c.Responses) {
 		res := c.Responses[c.ResponseIndex]
 		c.ResponseIndex += 1
@@ -71,16 +70,12 @@ func (c *DisperserClientMock) RetrieveBlob(ctx context.Context, in *disperser.Re
 	}
 }
 
-func (c *DisperserClientMock) DisperseBlob(ctx context.Context, in *disperser.DisperseBlobRequest, opts ...grpc.CallOption) (*disperser.DisperseBlobReply, error) {
+func (c *EigenDAClientMock) DisperseBlob(ctx context.Context, txData []byte) (*disperser.BlobInfo, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (c *DisperserClientMock) GetBlobStatus(ctx context.Context, in *disperser.BlobStatusRequest, opts ...grpc.CallOption) (*disperser.BlobStatusReply, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func NewDisperserClientMock(responses []*disperser.RetrieveBlobReply) disperser.DisperserClient {
-	return &DisperserClientMock{
+func NewEigenDAClientMock(responses [][]byte) eigenda.IEigenDA {
+	return &EigenDAClientMock{
 		Responses:     responses,
 		ResponseIndex: 0,
 	}
@@ -97,14 +92,9 @@ func TestDataFromEVMTransactions(t *testing.T) {
 		BatchInboxAddress: crypto.PubkeyToAddress(inboxPriv.PublicKey),
 	}
 
-	daCfg := &da.DAConfig{
-		Rpc: "",
-		Client: NewDisperserClientMock([]*disperser.RetrieveBlobReply{
-			{
-				Data: []byte{0x00, 0x01, 0x02},
-			},
-		}),
-	}
+	daClient := NewEigenDAClientMock([][]byte{
+		[]byte{0x00, 0x01, 0x02},
+	})
 
 	batcherAddr := crypto.PubkeyToAddress(batcherPriv.PublicKey)
 
@@ -168,7 +158,7 @@ func TestDataFromEVMTransactions(t *testing.T) {
 			}
 		}
 
-		out := DataFromEVMTransactions(cfg, daCfg, batcherAddr, txs, testlog.Logger(t, log.LvlCrit))
+		out := DataFromEVMTransactions(DataSourceConfig{cfg.L1Signer(), cfg.BatchInboxAddress}, batcherAddr, txs, testlog.Logger(t, log.LvlCrit), daClient)
 		require.ElementsMatch(t, expectedData, out)
 	}
 

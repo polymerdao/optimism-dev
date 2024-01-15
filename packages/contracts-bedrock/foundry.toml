@@ -17,7 +17,8 @@ remappings = [
   '@cwia/=lib/clones-with-immutable-args/src',
   'forge-std/=lib/forge-std/src',
   'ds-test/=lib/forge-std/lib/ds-test/src',
-  'safe-contracts/=lib/safe-contracts/contracts'
+  'safe-contracts/=lib/safe-contracts/contracts',
+  'solady/=lib/solady/src',
 ]
 extra_output = ['devdoc', 'userdoc', 'metadata', 'storageLayout']
 bytecode_hash = 'none'
@@ -53,8 +54,13 @@ ignore = ['src/vendor/WETH9.sol']
 #                         PROFILE: CI                          #
 ################################################################
 
-[profile.ci.fuzz]
-runs = 512
+[profile.ci]
+deny_warnings = true
+fuzz = { runs = 512 }
+
+[profile.ci.invariant]
+runs = 256
+depth = 32
 
 ################################################################
 #                         PROFILE: LITE                        #
@@ -62,3 +68,13 @@ runs = 512
 
 [profile.lite]
 optimizer = false
+
+################################################################
+#                         PROFILE: KONTROL                     #
+################################################################
+
+[profile.kontrol]
+src = 'src/L1'
+out = 'kout'
+test = 'test/kontrol'
+script = 'scripts-kontrol'
