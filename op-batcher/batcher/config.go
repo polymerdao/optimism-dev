@@ -62,6 +62,9 @@ type CLIConfig struct {
 	// the data availability type to use for posting batches, e.g. blobs vs calldata.
 	DataAvailabilityType flags.DataAvailabilityType
 
+	// ActiveSequencerCheckDuration is the duration between checks to determine the active sequencer endpoint.
+	ActiveSequencerCheckDuration time.Duration
+
 	TxMgrConfig      txmgr.CLIConfig
 	LogConfig        oplog.CLIConfig
 	MetricsConfig    opmetrics.CLIConfig
@@ -122,18 +125,19 @@ func NewConfig(ctx *cli.Context) *CLIConfig {
 		PollInterval:    ctx.Duration(flags.PollIntervalFlag.Name),
 
 		/* Optional Flags */
-		MaxPendingTransactions: ctx.Uint64(flags.MaxPendingTransactionsFlag.Name),
-		MaxChannelDuration:     ctx.Uint64(flags.MaxChannelDurationFlag.Name),
-		MaxL1TxSize:            ctx.Uint64(flags.MaxL1TxSizeBytesFlag.Name),
-		Stopped:                ctx.Bool(flags.StoppedFlag.Name),
-		BatchType:              ctx.Uint(flags.BatchTypeFlag.Name),
-		DataAvailabilityType:   flags.DataAvailabilityType(ctx.String(flags.DataAvailabilityTypeFlag.Name)),
-		TxMgrConfig:            txmgr.ReadCLIConfig(ctx),
-		LogConfig:              oplog.ReadCLIConfig(ctx),
-		MetricsConfig:          opmetrics.ReadCLIConfig(ctx),
-		PprofConfig:            oppprof.ReadCLIConfig(ctx),
-		CompressorConfig:       compressor.ReadCLIConfig(ctx),
-		RPC:                    oprpc.ReadCLIConfig(ctx),
-		DAConfig:               eigenda.ReadCLIConfig(ctx),
+		MaxPendingTransactions:       ctx.Uint64(flags.MaxPendingTransactionsFlag.Name),
+		MaxChannelDuration:           ctx.Uint64(flags.MaxChannelDurationFlag.Name),
+		MaxL1TxSize:                  ctx.Uint64(flags.MaxL1TxSizeBytesFlag.Name),
+		Stopped:                      ctx.Bool(flags.StoppedFlag.Name),
+		BatchType:                    ctx.Uint(flags.BatchTypeFlag.Name),
+		DataAvailabilityType:         flags.DataAvailabilityType(ctx.String(flags.DataAvailabilityTypeFlag.Name)),
+		ActiveSequencerCheckDuration: ctx.Duration(flags.ActiveSequencerCheckDurationFlag.Name),
+		TxMgrConfig:                  txmgr.ReadCLIConfig(ctx),
+		LogConfig:                    oplog.ReadCLIConfig(ctx),
+		MetricsConfig:                opmetrics.ReadCLIConfig(ctx),
+		PprofConfig:                  oppprof.ReadCLIConfig(ctx),
+		CompressorConfig:             compressor.ReadCLIConfig(ctx),
+		RPC:                          oprpc.ReadCLIConfig(ctx),
+		DAConfig:                     eigenda.ReadCLIConfig(ctx),
 	}
 }
