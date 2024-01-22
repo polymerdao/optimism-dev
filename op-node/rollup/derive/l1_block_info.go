@@ -20,7 +20,7 @@ import (
 const (
 	L1InfoFuncBedrockSignature = "setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"
 	L1InfoFuncEcotoneSignature = "setL1BlockValuesEcotone()"
-	L1InfoArguments            = 8
+	L1InfoArguments            = 9
 	L1InfoBedrockLen           = 4 + 32*L1InfoArguments
 	L1InfoEcotoneLen           = 4 + 32*5 // after Ecotone upgrade, args are packed into 5 32-byte slots
 )
@@ -50,6 +50,7 @@ type L1BlockInfo struct {
 
 	L1FeeOverhead eth.Bytes32 // ignored after Ecotone upgrade
 	L1FeeScalar   eth.Bytes32 // ignored after Ecotone upgrade
+	RootHash      common.Hash
 
 	BlobBaseFee       *big.Int // added by Ecotone upgrade
 	BaseFeeScalar     uint32   // added by Ecotone upgrade
@@ -69,6 +70,7 @@ type L1BlockInfo struct {
 // | 32      | BatcherHash              |
 // | 32      | L1FeeOverhead            |
 // | 32      | L1FeeScalar              |
+// | 32      | RootHash                 |
 // +---------+--------------------------+
 
 func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
@@ -98,6 +100,9 @@ func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
 		return nil, err
 	}
 	if err := solabi.WriteEthBytes32(w, info.L1FeeScalar); err != nil {
+		return nil, err
+	}
+	if err := solabi.WriteHash(w, info.RootHash); err != nil {
 		return nil, err
 	}
 	return w.Bytes(), nil
@@ -135,6 +140,9 @@ func (info *L1BlockInfo) unmarshalBinaryBedrock(data []byte) error {
 		return err
 	}
 	if info.L1FeeScalar, err = solabi.ReadEthBytes32(reader); err != nil {
+		return err
+	}
+	if info.RootHash, err = solabi.ReadHash(reader); err != nil {
 		return err
 	}
 	if !solabi.EmptyReader(reader) {
@@ -268,6 +276,7 @@ func L1InfoDeposit(rollupCfg *rollup.Config, sysCfg eth.SystemConfig, seqNumber 
 		BlockHash:      block.Hash(),
 		SequenceNumber: seqNumber,
 		BatcherAddr:    sysCfg.BatcherAddr,
+		RootHash:       block.Root(),
 	}
 	var data []byte
 	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
