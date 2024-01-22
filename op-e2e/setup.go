@@ -236,6 +236,14 @@ type GethInstance struct {
 	Node    *node.Node
 }
 
+func (gi *GethInstance) GenesisBlockHash() common.Hash {
+	return common.Hash{}
+}
+
+func (gi *GethInstance) GenesisBlockHeight() uint64 {
+	return 0
+}
+
 func (gi *GethInstance) HTTPEndpoint() string {
 	return gi.Node.HTTPEndpoint()
 }
@@ -263,6 +271,8 @@ type EthInstance interface {
 	WSEndpoint() string
 	HTTPAuthEndpoint() string
 	WSAuthEndpoint() string
+	GenesisBlockHash() common.Hash
+	GenesisBlockHeight() uint64
 	Close() error
 }
 
@@ -589,6 +599,11 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 				BinPath: cfg.ExternalL2Shim,
 				Genesis: l2Genesis,
 				JWTPath: cfg.JWTFilePath,
+				L1: eth.BlockID{
+					Hash:   l1Block.Hash(),
+					Number: l1Block.Number().Uint64(),
+				},
+				L2Time: uint64(cfg.DeployConfig.L1GenesisBlockTimestamp),
 			}).Run(t)
 		}
 		sys.EthInstances[name] = ethClient
@@ -696,6 +711,11 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 		nodeConfig := cfg.Nodes[name]
 		c := *nodeConfig // copy
 		c.Rollup = makeRollupConfig()
+		c.Rollup.Genesis.L2.Hash = sys.EthInstances[name].GenesisBlockHash()
+		c.Rollup.Genesis.L2.Number = sys.EthInstances[name].GenesisBlockHeight()
+		sys.RollupConfig.Genesis.L2.Hash = c.Rollup.Genesis.L2.Hash
+		sys.RollupConfig.Genesis.L2.Number = c.Rollup.Genesis.L2.Number
+
 		if err := c.LoadPersisted(cfg.Loggers[name]); err != nil {
 			return nil, err
 		}
