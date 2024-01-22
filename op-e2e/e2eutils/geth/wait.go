@@ -3,7 +3,6 @@ package geth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"time"
 
@@ -21,89 +20,59 @@ var (
 	errTimeout = errors.New("timeout")
 )
 
-func WaitForL1OriginOnL2(rollupCfg *rollup.Config, l1BlockNum uint64, client *ethclient.Client, timeout time.Duration) (*types.Block, error) {
-	timeoutCh := time.After(timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	headChan := make(chan *types.Header, 100)
-	headSub, err := client.SubscribeNewHead(ctx, headChan)
-	if err != nil {
-		return nil, err
-	}
-	defer headSub.Unsubscribe()
-
-	for {
-		select {
-		case head := <-headChan:
-			block, err := client.BlockByNumber(ctx, head.Number)
-			if err != nil {
-				return nil, err
-			}
-			l1Info, err := derive.L1BlockInfoFromBytes(rollupCfg, block.Time(), block.Transactions()[0].Data())
-			if err != nil {
-				return nil, err
-			}
-			if l1Info.Number >= l1BlockNum {
-				return block, nil
-			}
-
-		case err := <-headSub.Err():
-			return nil, fmt.Errorf("error in head subscription: %w", err)
-		case <-timeoutCh:
-			return nil, errTimeout
-		}
-	}
+type QueryResult interface {
+	*types.Block | *types.Receipt
 }
 
-func WaitForTransaction(hash common.Hash, client *ethclient.Client, timeout time.Duration) (*types.Receipt, error) {
-	ticker := time.NewTicker(100 * time.Millisecond)
+func withTimeout[T QueryResult](timeout time.Duration, cb func(ctx context.Context) (T, error)) (T, error) {
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
 	for {
-		receipt, err := client.TransactionReceipt(ctx, hash)
-		if receipt != nil && err == nil {
-			return receipt, nil
-		} else if err != nil && !errors.Is(err, ethereum.NotFound) {
+		result, err := cb(ctx)
+		if result != nil && err == nil {
+			return result, nil
+		}
+		if err != nil && err.Error() != ethereum.NotFound.Error() {
 			return nil, err
 		}
-
 		select {
 		case <-ctx.Done():
-			tip, err := client.BlockByNumber(context.Background(), nil)
-			if err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("receipt for transaction %s not found. tip block number is %d: %w", hash.Hex(), tip.NumberU64(), errTimeout)
+			return nil, errTimeout
 		case <-ticker.C:
 		}
 	}
 }
 
-func WaitForBlock(number *big.Int, client *ethclient.Client, timeout time.Duration) (*types.Block, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	headChan := make(chan *types.Header, 100)
-	headSub, err := client.SubscribeNewHead(ctx, headChan)
-	if err != nil {
-		return nil, err
-	}
-	defer headSub.Unsubscribe()
-
-	for {
-		select {
-		case head := <-headChan:
-			if head.Number.Cmp(number) >= 0 {
-				return client.BlockByNumber(ctx, number)
-			}
-		case err := <-headSub.Err():
-			return nil, fmt.Errorf("error in head subscription: %w", err)
-		case <-ctx.Done():
-			return nil, ctx.Err()
+func WaitForL1OriginOnL2(rollupCfg *rollup.Config, l1BlockNum uint64, client *ethclient.Client, timeout time.Duration) (*types.Block, error) {
+	return withTimeout[*types.Block](timeout, func(ctx context.Context) (*types.Block, error) {
+		block, err := client.BlockByNumber(ctx, nil)
+		if err != nil {
+			return nil, err
 		}
-	}
+		l1Info, err := derive.L1BlockInfoFromBytes(rollupCfg, block.Time(), block.Transactions()[0].Data())
+		if err != nil {
+			return nil, err
+		}
+		if l1Info.Number < l1BlockNum {
+			return nil, nil
+		}
+		return block, nil
+	})
+}
+
+func WaitForTransaction(hash common.Hash, client *ethclient.Client, timeout time.Duration) (*types.Receipt, error) {
+	return withTimeout[*types.Receipt](timeout, func(ctx context.Context) (*types.Receipt, error) {
+		return client.TransactionReceipt(ctx, hash)
+	})
+}
+
+func WaitForBlock(number *big.Int, client *ethclient.Client, timeout time.Duration) (*types.Block, error) {
+	return withTimeout[*types.Block](timeout, func(ctx context.Context) (*types.Block, error) {
+		return client.BlockByNumber(ctx, number)
+	})
 }
 
 func WaitForBlockToBeFinalized(number *big.Int, client *ethclient.Client, timeout time.Duration) (*types.Block, error) {
