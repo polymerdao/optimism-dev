@@ -1,0 +1,55 @@
+_default:
+    @just --list --justfile {{justfile()}}
+
+# where polymer peptide server and its shim are located
+WD := "./external_polymer"
+BATCHER_WD := "../op-batcher"
+go_test_flags := "-timeout=20m -parallel=8"
+
+# build polymer peptide server and its shim under ./external_polymer
+build-polymer:
+    make -C {{WD}} build
+
+build-op-batcher:
+    make -C {{BATCHER_WD}} op-batcher
+
+build-op-programs:
+    make -C ../op-program op-program
+    make -C ../cannon cannon
+
+test-polymer-shim *GO_TEST_FLAGS: build-polymer
+    cd {{WD}} && go test ./... -v
+
+test-op-batcher *GO_TEST_FLAGS: build-op-batcher
+    make -C {{BATCHER_WD}} test
+
+# Can add extra flags to `go test`, e.g. `just test-sys-e2e -v -count=1`
+# run it like this to execute tests on a single file
+# just GO_TEST_FILES=system_test.go test-sys-e2e
+
+test: test-sys-e2e
+
+GO_TEST_FILES := '*_test.go'
+test-sys-e2e *GO_TEST_FLAGS: build-polymer build-op-programs
+    #!/usr/bin/env bash
+    echo
+    echo "> logs are stored under the ./logs dir"
+    files=( {{GO_TEST_FILES}} )
+    echo "> executing tests from: ${files[@]}"
+    mkdir -p logs
+    ret=0
+    while read -r test; do
+      echo -n "> running ${test} ..."
+      go test --externalL2 {{WD}} {{GO_TEST_FLAGS}} -run "$test" &> "./logs/${test}.log"
+      exitcode=$?
+      ret=$(( ret + exitcode ))
+      echo " exit code: $exitcode, ret: $ret"
+    done < <( grep '^func Test' "${files[@]}" | grep -oE 'Test[^(]+' )
+    if (( ret != 0 )); then
+      exit 1
+    fi
+
+# set up devnet; only need to run once
+setup-devnet:
+    git submodule update --init --recursive
+    make devnet-allocs

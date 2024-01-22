@@ -15,6 +15,9 @@ type Config struct {
 	GasCeil     uint64 `json:"gas_ceil"`
 	GenesisPath string `json:"genesis_path"`
 	Verbosity   uint64 `json:"verbosity"`
+	L1Hash      string `json:"l1_hash"`
+	L1Height    uint64 `json:"l1_height"`
+	L2Time      uint64 `json:"l2_time"`
 
 	// EndpointsReadyPath is the location to write the endpoint configuration file.
 	// Note, this should be written atomically by writing the JSON, then moving
@@ -38,10 +41,12 @@ func AtomicEncode(path string, val any) error {
 }
 
 type Endpoints struct {
-	HTTPEndpoint     string `json:"http_endpoint"`
-	WSEndpoint       string `json:"ws_endpoint"`
-	HTTPAuthEndpoint string `json:"http_auth_endpoint"`
-	WSAuthEndpoint   string `json:"ws_auth_endpoint"`
+	HTTPEndpoint       string `json:"http_endpoint"`
+	WSEndpoint         string `json:"ws_endpoint"`
+	HTTPAuthEndpoint   string `json:"http_auth_endpoint"`
+	WSAuthEndpoint     string `json:"ws_auth_endpoint"`
+	GenesisBlockHash   string `json:"genesis_block_hash"`
+	GenesisBlockHeight string `json:"genesis_block_height"`
 }
 
 type TestParms struct {
