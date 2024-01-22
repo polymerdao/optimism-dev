@@ -99,7 +99,14 @@ func NewOpGeth(t testing.TB, ctx context.Context, cfg *e2esys.SystemConfig) (*Op
 			BinPath: cfg.ExternalL2Shim,
 			Genesis: l2Genesis,
 			JWTPath: cfg.JWTFilePath,
+			L1: eth.BlockID{
+				Hash:   l1Block.Hash(),
+				Number: l1Block.Number().Uint64(),
+			},
+			L2Time: rollupGenesis.L2Time,
 		}).Run(t)
+		rollupGenesis.L2.Hash = externalNode.GenesisBlockHash()
+		rollupGenesis.L2.Number = externalNode.GenesisBlockHeight()
 		node = externalNode
 	}
 
@@ -125,6 +132,10 @@ func NewOpGeth(t testing.TB, ctx context.Context, cfg *e2esys.SystemConfig) (*Op
 	genesisPayload, err := eth.BlockAsPayload(l2GenesisBlock, cfg.DeployConfig.CanyonTime(l2GenesisBlock.Time()))
 
 	require.NoError(t, err)
+	genesisPayload.BlockHash = rollupGenesis.L2.Hash
+	genesisPayload.BlockNumber = hexutil.Uint64(rollupGenesis.L2.Number)
+	genesisPayload.Timestamp = hexutil.Uint64(rollupGenesis.L2Time)
+
 	return &OpGeth{
 		node:          node,
 		L2Client:      l2Client,
