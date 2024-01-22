@@ -88,16 +88,23 @@ func NewOpGeth(t testing.TB, ctx context.Context, cfg *SystemConfig) (*OpGeth, e
 	var node EthInstance
 	if cfg.ExternalL2Shim == "" {
 		gethNode, _, err := geth.InitL2("l2", big.NewInt(int64(cfg.DeployConfig.L2ChainID)), l2Genesis, cfg.JWTFilePath)
-		require.NoError(t, err)
-		require.NoError(t, gethNode.Start())
-		node = gethNode
+		require.Nil(t, err)
+		require.Nil(t, gethNode.Start())
+		node = &GethInstance{Node: gethNode}
 	} else {
 		externalNode := (&ExternalRunner{
 			Name:    "l2",
 			BinPath: cfg.ExternalL2Shim,
 			Genesis: l2Genesis,
 			JWTPath: cfg.JWTFilePath,
+			L1: eth.BlockID{
+				Hash:   l1Block.Hash(),
+				Number: l1Block.Number().Uint64(),
+			},
+			L2Time: rollupGenesis.L2Time,
 		}).Run(t)
+		rollupGenesis.L2.Hash = externalNode.GenesisBlockHash()
+		rollupGenesis.L2.Number = externalNode.GenesisBlockHeight()
 		node = externalNode
 	}
 
@@ -122,7 +129,12 @@ func NewOpGeth(t testing.TB, ctx context.Context, cfg *SystemConfig) (*OpGeth, e
 
 	genesisPayload, err := eth.BlockAsPayload(l2GenesisBlock, cfg.DeployConfig.CanyonTime(l2GenesisBlock.Time()))
 
-	require.NoError(t, err)
+	require.Nil(t, err)
+
+	genesisPayload.BlockHash = rollupGenesis.L2.Hash
+	genesisPayload.BlockNumber = hexutil.Uint64(rollupGenesis.L2.Number)
+	genesisPayload.Timestamp = hexutil.Uint64(rollupGenesis.L2Time)
+
 	return &OpGeth{
 		node:          node,
 		L2Client:      l2Client,
