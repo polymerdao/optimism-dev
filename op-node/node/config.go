@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -48,6 +49,8 @@ type Config struct {
 	// Runtime config changes should be picked up from log-events,
 	// but if log-events are not coming in (e.g. not syncing blocks) then the reload ensures the config stays accurate.
 	RuntimeConfigReloadInterval time.Duration
+
+	DA eigenda.Config
 
 	// Optional
 	Tracer    Tracer

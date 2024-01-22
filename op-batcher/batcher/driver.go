@@ -13,12 +13,15 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
+	"github.com/ethereum-optimism/optimism/op-service/proto/gen/op_service/v1"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 )
 
@@ -46,6 +49,7 @@ type DriverSetup struct {
 	L1Client         L1Client
 	EndpointProvider dial.L2EndpointProvider
 	ChannelConfig    ChannelConfig
+	DA               eigenda.IEigenDA
 }
 
 // BatchSubmitter encapsulates a service responsible for submitting L2 tx
@@ -296,7 +300,7 @@ func (l *BatchSubmitter) loop() {
 }
 
 // publishStateToL1 loops through the block data loaded into `state` and
-// submits the associated data to the L1 in the form of channel frames.
+// submits the associated data to DA in the form of channel frames and submits the associated DA refs to the L1.
 func (l *BatchSubmitter) publishStateToL1(queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData], drain bool) {
 	txDone := make(chan struct{})
 	// send/wait and receipt reading must be on a separate goroutines to avoid deadlocks
@@ -309,7 +313,7 @@ func (l *BatchSubmitter) publishStateToL1(queue *txmgr.Queue[txData], receiptsCh
 			close(txDone)
 		}()
 		for {
-			err := l.publishTxToL1(l.killCtx, queue, receiptsCh)
+			err := l.publishFrameToL1(l.killCtx, queue, receiptsCh)
 			if err != nil {
 				if drain && err != io.EOF {
 					l.Log.Error("error sending tx while draining state", "err", err)
@@ -329,8 +333,8 @@ func (l *BatchSubmitter) publishStateToL1(queue *txmgr.Queue[txData], receiptsCh
 	}
 }
 
-// publishTxToL1 submits a single state tx to the L1
-func (l *BatchSubmitter) publishTxToL1(ctx context.Context, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) error {
+// publishFrameToL1 submits a single state frame to the DA layer
+func (l *BatchSubmitter) publishFrameToL1(ctx context.Context, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) error {
 	// send all available transactions
 	l1tip, err := l.l1Tip(ctx)
 	if err != nil {
@@ -360,12 +364,45 @@ func (l *BatchSubmitter) publishTxToL1(ctx context.Context, queue *txmgr.Queue[t
 // This is a blocking method. It should not be called concurrently.
 func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txData], receiptsCh chan txmgr.TxReceipt[txData]) error {
 	// Do the gas estimation offline. A value of 0 will cause the [txmgr] to estimate the gas limit.
-	data := txdata.Bytes()
+	var wrappedData []byte
+	blobInfo, err := l.DA.DisperseBlob(context.Background(), txdata.Bytes())
+	if err != nil { // fallback to posting raw frame to calldata, although still within this proto wrapper
+		l.Log.Error("Unable to publish batch frameset to EigenDA, falling back to calldata", "err", err)
+		calldataFrame := &op_service.CalldataFrame{
+			Value: &op_service.CalldataFrame_Frame{
+				Frame: txdata.Bytes(),
+			},
+		}
+		wrappedData, err = proto.Marshal(calldataFrame)
+		if err != nil {
+			return err
+		}
+	} else { // happy path, post raw frame to eigenda then post frameRef to calldata
+		quorumIDs := make([]uint32, len(blobInfo.BlobHeader.BlobQuorumParams))
+		for i := range quorumIDs {
+			quorumIDs[i] = blobInfo.BlobHeader.BlobQuorumParams[i].QuorumNumber
+		}
+		calldataFrame := &op_service.CalldataFrame{
+			Value: &op_service.CalldataFrame_FrameRef{
+				FrameRef: &op_service.FrameRef{
+					BatchHeaderHash:      blobInfo.BlobVerificationProof.BatchMetadata.BatchHeaderHash,
+					BlobIndex:            blobInfo.BlobVerificationProof.BlobIndex,
+					ReferenceBlockNumber: blobInfo.BlobVerificationProof.BatchMetadata.ConfirmationBlockNumber,
+					QuorumIds:            quorumIDs,
+					BlobLength:           uint32(len(txdata.Bytes())),
+				},
+			},
+		}
+		wrappedData, err = proto.Marshal(calldataFrame)
+		if err != nil {
+			return err
+		}
+	}
 
 	var candidate *txmgr.TxCandidate
 	if l.Config.UseBlobs {
 		var err error
-		if candidate, err = l.blobTxCandidate(data); err != nil {
+		if candidate, err = l.blobTxCandidate(wrappedData); err != nil {
 			// We could potentially fall through and try a calldata tx instead, but this would
 			// likely result in the chain spending more in gas fees than it is tuned for, so best
 			// to just fail. We do not expect this error to trigger unless there is a serious bug
@@ -373,7 +410,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 			return fmt.Errorf("could not create blob tx candidate: %w", err)
 		}
 	} else {
-		candidate = l.calldataTxCandidate(data)
+		candidate = l.calldataTxCandidate(wrappedData)
 	}
 
 	intrinsicGas, err := core.IntrinsicGas(candidate.TxData, nil, false, true, true, false)

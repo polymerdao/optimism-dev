@@ -1,3 +1,6 @@
+PROTOS := ./proto/src
+PROTO_GEN := ./proto/gen
+
 test:
 	go test -v ./...
 

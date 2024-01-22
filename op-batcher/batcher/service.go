@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -68,6 +70,8 @@ type BatcherService struct {
 	stopped         atomic.Bool
 
 	NotSubmittingOnStart bool
+
+	DA eigenda.IEigenDA
 }
 
 // BatcherServiceFromCLIConfig creates a new BatcherService from a CLIConfig.
@@ -109,6 +113,9 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 	}
 	if err := bs.initPProf(cfg); err != nil {
 		return fmt.Errorf("failed to init profiling: %w", err)
+	}
+	if err := bs.initDA(cfg); err != nil {
+		return fmt.Errorf("failed to init DA: %w", err)
 	}
 	bs.initDriver()
 	if err := bs.initRPCServer(cfg); err != nil {
@@ -258,7 +265,27 @@ func (bs *BatcherService) initDriver() {
 		L1Client:         bs.L1Client,
 		EndpointProvider: bs.EndpointProvider,
 		ChannelConfig:    bs.ChannelConfig,
+		DA:               bs.DA,
 	})
+}
+
+func (bs *BatcherService) initDA(cfg *CLIConfig) error {
+	disperserSecurityParams := []*disperser.SecurityParams{}
+	disperserSecurityParams = append(disperserSecurityParams, &disperser.SecurityParams{
+		QuorumId:           cfg.DAConfig.PrimaryQuorumID,
+		AdversaryThreshold: cfg.DAConfig.PrimaryAdversaryThreshold,
+		QuorumThreshold:    cfg.DAConfig.PrimaryQuorumThreshold,
+	})
+	bs.DA = &eigenda.EigenDA{
+		Config: eigenda.Config{
+			RPC:                      cfg.DAConfig.RPC,
+			DisperserSecurityParams:  disperserSecurityParams,
+			StatusQueryTimeout:       cfg.DAConfig.StatusQueryTimeout,
+			StatusQueryRetryInterval: cfg.DAConfig.StatusQueryRetryInterval,
+		},
+		Log: bs.Log,
+	}
+	return nil
 }
 
 func (bs *BatcherService) initRPCServer(cfg *CLIConfig) error {

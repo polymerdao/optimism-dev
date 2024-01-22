@@ -42,6 +42,12 @@ var (
 		Value:       "",
 		Destination: new(string),
 	}
+	DARPC = &cli.StringFlag{
+		Name:    "da-rpc",
+		Usage:   "Data Availability RPC",
+		Value:   "http://da:26658",
+		EnvVars: prefixEnvVars("DA_RPC"),
+	}
 	/* Optional Flags */
 	BeaconAddr = &cli.StringFlag{
 		Name:     "l1.beacon",
@@ -262,6 +268,7 @@ var requiredFlags = []cli.Flag{
 	L1NodeAddr,
 	L2EngineAddr,
 	L2EngineJWTSecret,
+	DARPC,
 }
 
 var optionalFlags = []cli.Flag{

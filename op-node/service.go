@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	"github.com/ethereum-optimism/optimism/op-node/chaincfg"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/log"
@@ -73,6 +75,11 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		haltOption = ""
 	}
 
+	daCfg, err := NewEigenDAConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load da config: %w", err)
+	}
+
 	cfg := &node.Config{
 		L1:     l1Endpoint,
 		L2:     l2Endpoint,
@@ -103,6 +110,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		Sync:              *syncConfig,
 		RollupHalt:        haltOption,
 		RethDBPath:        ctx.String(flags.L1RethDBPath.Name),
+		DA:                daCfg,
 	}
 
 	if err := cfg.LoadPersisted(log); err != nil {
@@ -263,4 +271,12 @@ func NewSyncConfig(ctx *cli.Context, log log.Logger) (*sync.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func NewEigenDAConfig(ctx *cli.Context) (eigenda.Config, error) {
+	rpc := ctx.String(flags.DARPC.Name)
+	return eigenda.Config{
+		RPC: rpc,
+		// Can leave everything else unfilled for the node
+	}, nil
 }

@@ -8,6 +8,7 @@ import calendar
 import datetime
 import time
 import shutil
+import sys
 import http.client
 import gzip
 from multiprocessing import Process, Queue
@@ -30,16 +31,40 @@ class Bunch:
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
 
+# class ChildProcess:
+#     def __init__(self, func, *args):
+#         self.errq = Queue()
+#         self.process = Process(target=self._func, args=(func, args))
+
+#     def _func(self, func, args):
+#         try:
+#             func(*args)
+#         except Exception as e:
+#             self.errq.put(e)
+
+#     def start(self):
+#         self.process.start()
+
+#     def join(self):
+#         self.process.join()
+
+#     def get_error(self):
+#         return self.errq.get() if not self.errq.empty() else None
+
 class ChildProcess:
     def __init__(self, func, *args):
         self.errq = Queue()
         self.process = Process(target=self._func, args=(func, args))
 
     def _func(self, func, args):
+        # Redirect stdout and stderr to the parent process's stdout and stderr
+        os.dup2(sys.__stdout__.fileno(), sys.stdout.fileno())
+        os.dup2(sys.__stderr__.fileno(), sys.stderr.fileno())
+
         try:
             func(*args)
         except Exception as e:
-            self.errq.put(str(e))
+            self.errq.put(e)
 
     def start(self):
         self.process.start()
@@ -124,6 +149,7 @@ def deploy_contracts(paths):
     res = eth_accounts('127.0.0.1:8545')
 
     response = json.loads(res)
+    print(response)
     account = response['result'][0]
     log.info(f'Deploying with {account}')
 
@@ -147,7 +173,10 @@ def deploy_contracts(paths):
         '--unlocked', '--with-gas-price', '100000000000'
     ], env={}, cwd=paths.contracts_bedrock_dir)
 
-    shutil.copy(paths.l1_deployments_path, paths.addresses_json_path)
+    if os.path.exists(paths.l1_deployments_path):
+      shutil.copy(paths.l1_deployments_path, paths.addresses_json_path)
+    else:
+        raise Exception(f"File {paths.l1_deployments_path} does not exist for copy")
 
 def init_devnet_l1_deploy_config(paths, update_timestamp=False):
     deploy_config = read_json(paths.devnet_config_template_path)
@@ -374,20 +403,52 @@ def run_command_preset(command: CommandPreset):
             proc.kill()
     return proc.returncode
 
+# def run_command(args, check=True, shell=False, cwd=None, env=None):
+#     env = env if env else {}
+#     completed_process = subprocess.run(
+#         args,
+#         check=False,  # Handle the check manually for custom error messages
+#         shell=shell,
+#         env={**os.environ, **env},
+#         cwd=cwd,
+#         stderr=subprocess.PIPE,  # Capture stderr
+#         text=True  # Convert output to string
+#     )
 
-def run_command(args, check=True, shell=False, cwd=None, env=None, timeout=None):
+#     # Check if the subprocess was successful
+#     if check and completed_process.returncode != 0:
+#         # Raise an exception with stderr as the error message
+#         raise subprocess.CalledProcessError(
+#             completed_process.returncode,
+#             completed_process.args,
+#             stderr=completed_process.stderr.strip()
+#         )
+
+#     return completed_process
+
+
+def run_command(args, check=True, shell=False, cwd=None, env=None):
     env = env if env else {}
-    return subprocess.run(
+    completed_process = subprocess.run(
         args,
-        check=check,
+        check=False,  # Handle the check manually for custom error messages
         shell=shell,
-        env={
-            **os.environ,
-            **env
-        },
+        env={**os.environ, **env},
         cwd=cwd,
-        timeout=timeout
+        # Removed the stderr=subprocess.PIPE to allow stderr to be output to the caller's stderr
+        text=True  # Convert output to string
     )
+
+    # Check if the subprocess was successful
+    if check and completed_process.returncode != 0:
+        # Raise an exception with return code and command arguments
+        raise subprocess.CalledProcessError(
+            completed_process.returncode,
+            completed_process.args
+            # Removed stderr from the exception to avoid duplicating error messages
+        )
+
+    return completed_process
 
 
 def wait_up(port, retries=10, wait_secs=1):

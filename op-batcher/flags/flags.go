@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-batcher/compressor"
 	opservice "github.com/ethereum-optimism/optimism/op-service"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	openum "github.com/ethereum-optimism/optimism/op-service/enum"
 	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -129,6 +130,7 @@ func init() {
 	optionalFlags = append(optionalFlags, oppprof.CLIFlags(EnvVarPrefix)...)
 	optionalFlags = append(optionalFlags, txmgr.CLIFlags(EnvVarPrefix)...)
 	optionalFlags = append(optionalFlags, compressor.CLIFlags(EnvVarPrefix)...)
+	optionalFlags = append(optionalFlags, eigenda.CLIFlags(EnvVarPrefix)...)
 
 	Flags = append(requiredFlags, optionalFlags...)
 }

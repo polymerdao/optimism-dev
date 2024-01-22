@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
 
@@ -34,14 +35,19 @@ type DataSourceFactory struct {
 	fetcher      L1TransactionFetcher
 	blobsFetcher L1BlobsFetcher
 	ecotoneTime  *uint64
+	daClient     eigenda.IEigenDA
 }
 
-func NewDataSourceFactory(log log.Logger, cfg *rollup.Config, fetcher L1TransactionFetcher, blobsFetcher L1BlobsFetcher) *DataSourceFactory {
+func NewDataSourceFactory(log log.Logger, cfg *rollup.Config, fetcher L1TransactionFetcher, blobsFetcher L1BlobsFetcher, daCfg *eigenda.Config) *DataSourceFactory {
 	config := DataSourceConfig{
 		l1Signer:          cfg.L1Signer(),
 		batchInboxAddress: cfg.BatchInboxAddress,
 	}
-	return &DataSourceFactory{log: log, dsCfg: config, fetcher: fetcher, blobsFetcher: blobsFetcher, ecotoneTime: cfg.EcotoneTime}
+	daClient := &eigenda.EigenDA{
+		Log:    log,
+		Config: *daCfg,
+	}
+	return &DataSourceFactory{log: log, dsCfg: config, fetcher: fetcher, blobsFetcher: blobsFetcher, ecotoneTime: cfg.EcotoneTime, daClient: daClient}
 }
 
 // OpenData returns the appropriate data source for the L1 block `ref`.
@@ -52,7 +58,7 @@ func (ds *DataSourceFactory) OpenData(ctx context.Context, ref eth.L1BlockRef, b
 		}
 		return NewBlobDataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ds.blobsFetcher, ref, batcherAddr), nil
 	}
-	return NewCalldataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ref, batcherAddr), nil
+	return NewCalldataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ref, batcherAddr, ds.daClient), nil
 }
 
 // DataSourceConfig regroups the mandatory rollup.Config fields needed for DataFromEVMTransactions.

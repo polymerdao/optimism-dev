@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 
 	"github.com/hashicorp/go-multierror"
@@ -50,6 +51,7 @@ type OpNode struct {
 	p2pSigner p2p.Signer            // p2p gogssip application messages will be signed with this signer
 	tracer    Tracer                // tracer to get events for testing/debugging
 	runCfg    *RuntimeConfig        // runtime configurables
+	daCfg     *eigenda.Config       // EigenDA client and configuration
 
 	rollupHalt string // when to halt the rollup, disabled if empty
 
@@ -142,6 +144,7 @@ func (n *OpNode) init(ctx context.Context, cfg *Config, snapshotLog log.Logger) 
 	if err := n.initPProf(cfg); err != nil {
 		return fmt.Errorf("failed to init profiling: %w", err)
 	}
+	n.daCfg = &cfg.DA
 	return nil
 }
 
@@ -367,7 +370,7 @@ func (n *OpNode) initL2(ctx context.Context, cfg *Config, snapshotLog log.Logger
 		return err
 	}
 
-	n.l2Driver = driver.NewDriver(&cfg.Driver, &cfg.Rollup, n.l2Source, n.l1Source, n.beacon, n, n, n.log, snapshotLog, n.metrics, cfg.ConfigPersistence, &cfg.Sync)
+	n.l2Driver = driver.NewDriver(&cfg.Driver, &cfg.Rollup, n.l2Source, n.l1Source, n.beacon, n, n, n.log, snapshotLog, n.metrics, cfg.ConfigPersistence, &cfg.Sync, &cfg.DA)
 
 	return nil
 }

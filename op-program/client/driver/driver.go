@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -39,9 +40,9 @@ type Driver struct {
 	targetBlockNum uint64
 }
 
-func NewDriver(logger log.Logger, cfg *rollup.Config, l1Source derive.L1Fetcher, l2Source L2Source, targetBlockNum uint64) *Driver {
+func NewDriver(logger log.Logger, cfg *rollup.Config, l1Source derive.L1Fetcher, l2Source L2Source, targetBlockNum uint64, daCfg *eigenda.Config) *Driver {
 	engine := derive.NewEngineController(l2Source, logger, metrics.NoopMetrics, cfg, sync.CLSync)
-	pipeline := derive.NewDerivationPipeline(logger, cfg, l1Source, nil, l2Source, engine, metrics.NoopMetrics, &sync.Config{})
+	pipeline := derive.NewDerivationPipeline(logger, cfg, l1Source, nil, l2Source, engine, metrics.NoopMetrics, &sync.Config{}, daCfg)
 	pipeline.Reset()
 	return &Driver{
 		logger:         logger,
