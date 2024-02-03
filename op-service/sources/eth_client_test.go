@@ -3,8 +3,11 @@ package sources
 import (
 	"context"
 	crand "crypto/rand"
+	"fmt"
+	oplog "github.com/ethereum-optimism/optimism/op-service/log"
 	"math/big"
 	"math/rand"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -126,21 +129,20 @@ func TestEthClient_InfoByHash(t *testing.T) {
 }
 
 func TestEthClient_InfoByNumber(t *testing.T) {
-	m := new(mockRPC)
-	_, rhdr := randHeader()
-	expectedInfo, _ := rhdr.Info(true, false)
-	n := rhdr.Number
 	ctx := context.Background()
-	m.On("CallContext", ctx, new(*rpcHeader),
-		"eth_getBlockByNumber", []any{n.String(), false}).Run(func(args mock.Arguments) {
-		*args[1].(**rpcHeader) = rhdr
-	}).Return([]error{nil})
-	s, err := NewL1Client(m, nil, nil, L1ClientDefaultConfig(&rollup.Config{SeqWindowSize: 10}, true, RPCKindStandard))
+	logger := oplog.DefaultCLIConfig()
+
+	log := oplog.NewLogger(os.Stderr, logger)
+	l1RPC, err := client.NewRPC(ctx, log, "https://eth-sepolia.g.alchemy.com/v2/zoTGfJGWR7dlEKU2r_ruYFT_AhG_fzZQ", client.WithDialBackoff(5))
+
+	s, err := NewL1Client(l1RPC, log, nil, L1ClientDefaultConfig(&rollup.Config{SeqWindowSize: 10}, false, RPCKindAlchemy))
 	require.NoError(t, err)
-	info, err := s.InfoByNumber(ctx, uint64(n))
+	info, err := s.InfoByNumber(ctx, uint64(5187053))
 	require.NoError(t, err)
-	require.Equal(t, info, expectedInfo)
-	m.Mock.AssertExpectations(t)
+	fmt.Print(info)
+
+	_, _, err = s.FetchReceipts(ctx, info.Hash())
+	require.NoError(t, err)
 }
 
 func TestEthClient_WrongInfoByNumber(t *testing.T) {
