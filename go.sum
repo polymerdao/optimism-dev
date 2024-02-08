@@ -16,8 +16,8 @@ github.com/DataDog/datadog-go v2.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3
 github.com/DataDog/datadog-go v3.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/DataDog/zstd v1.5.2 h1:vUG4lAyuPCXO0TLbXvPv7EB7cNK1QV/luu55UHLrrn8=
 github.com/DataDog/zstd v1.5.2/go.mod h1:g4AWEaM3yOg3HYfnJ3YIawPnVdXJh9QME85blwSAmyw=
-github.com/Layr-Labs/eigenda/api v0.1.1 h1:vzSxUQirg/jWVSoaOhuIxcvPTh8HImGD0KnPgqU1kj4=
-github.com/Layr-Labs/eigenda/api v0.1.1/go.mod h1:kVXqWM13s/1hXyv9QdHweWAbKin9MeOBbS4i8c9rLbU=
+github.com/Layr-Labs/eigenda/api v0.3.0 h1:PBG3L1aemZO/0Hp21Taz0sBSn9LbvBZsqCKrzeYJur0=
+github.com/Layr-Labs/eigenda/api v0.3.0/go.mod h1:kVXqWM13s/1hXyv9QdHweWAbKin9MeOBbS4i8c9rLbU=
 github.com/Masterminds/semver/v3 v3.1.1/go.mod h1:VPu/7SZ7ePZ3QOrcuXROw5FAcLl4a0cBrbBpGY/8hQs=
 github.com/Microsoft/go-winio v0.6.1 h1:9/kr64B9VUZrLm5YYwbGtUJnMgqWVOdUAXu6Migciow=
 github.com/Microsoft/go-winio v0.6.1/go.mod h1:LRdKpFKfdobln8UmuiYcKPot9D2v6svN5+sAH+4kjUM=
