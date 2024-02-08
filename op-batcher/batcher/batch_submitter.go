@@ -20,7 +20,6 @@ func Main(version string) cliapp.LifecycleAction {
 			return nil, err
 		}
 		cfg := NewConfig(cliCtx)
-		fmt.Println("TEDDY: ", cfg.DAConfig.RPC)
 		if err := cfg.Check(); err != nil {
 			return nil, fmt.Errorf("invalid CLI flags: %w", err)
 		}
