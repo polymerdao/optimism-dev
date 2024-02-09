@@ -10,11 +10,11 @@ COPY ./op-bindings /app/op-bindings
 COPY ./op-service /app/op-service
 
 WORKDIR /app/op-node
-# RUN go mod download -x
+RUN go mod download -x
 
 COPY ./op-node /app/op-node
 
-RUN --mount=type=cache,target="/root/.cache/go-build" go build -o ./bin/stateviz ./cmd/stateviz
+RUN go build -o ./bin/stateviz ./cmd/stateviz
 
 FROM alpine:3.19
 
