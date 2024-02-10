@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	preimage "github.com/ethereum-optimism/optimism/op-preimage"
 	"github.com/ethereum-optimism/optimism/op-program/chainconfig"
+	"github.com/ethereum-optimism/optimism/op-service/eigenda"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -34,9 +35,9 @@ type BootInfo struct {
 	L2Claim            common.Hash
 	L2ClaimBlockNumber uint64
 	L2ChainID          uint64
-
-	L2ChainConfig *params.ChainConfig
-	RollupConfig  *rollup.Config
+	DAConfig           *eigenda.Config
+	L2ChainConfig      *params.ChainConfig
+	RollupConfig       *rollup.Config
 }
 
 type oracleClient interface {
@@ -90,6 +91,7 @@ func (br *BootstrapClient) BootInfo() *BootInfo {
 		L2ClaimBlockNumber: l2ClaimBlockNumber,
 		L2ChainID:          l2ChainID,
 		L2ChainConfig:      l2ChainConfig,
-		RollupConfig:       rollupConfig,
+		// TODO: DAConfig:           daCfg,
+		RollupConfig: rollupConfig,
 	}
 }
