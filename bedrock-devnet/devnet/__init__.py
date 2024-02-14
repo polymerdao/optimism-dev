@@ -8,7 +8,6 @@ import calendar
 import datetime
 import time
 import shutil
-import sys
 import http.client
 import gzip
 from multiprocessing import Process, Queue
@@ -30,26 +29,6 @@ log = logging.getLogger()
 class Bunch:
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
-
-# class ChildProcess:
-#     def __init__(self, func, *args):
-#         self.errq = Queue()
-#         self.process = Process(target=self._func, args=(func, args))
-
-#     def _func(self, func, args):
-#         try:
-#             func(*args)
-#         except Exception as e:
-#             self.errq.put(e)
-
-#     def start(self):
-#         self.process.start()
-
-#     def join(self):
-#         self.process.join()
-
-#     def get_error(self):
-#         return self.errq.get() if not self.errq.empty() else None
 
 class ChildProcess:
     def __init__(self, func, *args):
@@ -173,7 +152,7 @@ def deploy_contracts(paths):
         '--unlocked', '--with-gas-price', '100000000000'
     ], env={}, cwd=paths.contracts_bedrock_dir)
 
-    if os.path.exists(paths.l1_deployments_path):
+    if os.path.isfile(paths.l1_deployments_path):
       shutil.copy(paths.l1_deployments_path, paths.addresses_json_path)
     else:
         raise Exception(f"File {paths.l1_deployments_path} does not exist for copy")
