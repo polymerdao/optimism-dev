@@ -101,7 +101,9 @@ func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address,
 					return nil
 				}
 
-				log.Info("requesting data from EigenDA", "quorum id", frameRef.QuorumIds[0], "confirmation block number", frameRef.ReferenceBlockNumber)
+				log.Info("requesting data from EigenDA", "quorum id", frameRef.QuorumIds[0], "confirmation block number",
+					frameRef.ReferenceBlockNumber, "blob index", frameRef.BlobIndex, "batch header hash",
+					base64.StdEncoding.EncodeToString(frameRef.BatchHeaderHash), "blob length", frameRef.BlobLength)
 				data, err := daClient.RetrieveBlob(context.Background(), frameRef.BatchHeaderHash, frameRef.BlobIndex)
 				if err != nil {
 					retrieveReqJSON, _ := json.Marshal(struct {
