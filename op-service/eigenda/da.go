@@ -2,6 +2,7 @@ package eigenda
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum/go-ethereum/log"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 )
 
 type IEigenDA interface {
@@ -25,7 +26,10 @@ type EigenDA struct {
 }
 
 func (m *EigenDA) RetrieveBlob(ctx context.Context, BatchHeaderHash []byte, BlobIndex uint32) ([]byte, error) {
-	conn, err := grpc.Dial(m.RPC, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	config := &tls.Config{}
+	credential := credentials.NewTLS(config)
+	dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(credential)}
+	conn, err := grpc.Dial(m.RPC, dialOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +47,10 @@ func (m *EigenDA) RetrieveBlob(ctx context.Context, BatchHeaderHash []byte, Blob
 
 func (m *EigenDA) DisperseBlob(ctx context.Context, txData []byte) (*disperser.BlobInfo, error) {
 	m.Log.Info("Attempting to disperse blob to EigenDA")
-	conn, err := grpc.Dial(m.RPC, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	config := &tls.Config{}
+	credential := credentials.NewTLS(config)
+	dialOptions := []grpc.DialOption{grpc.WithTransportCredentials(credential)}
+	conn, err := grpc.Dial(m.RPC, dialOptions...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +87,7 @@ func (m *EigenDA) DisperseBlob(ctx context.Context, txData []byte) (*disperser.B
 		})
 		if err != nil {
 			m.Log.Warn("Unable to retrieve blob dispersal status, will retry", "requestID", base64RequestID, "err", err)
-		} else if statusRes.Status == disperser.BlobStatus_CONFIRMED {
+		} else if statusRes.Status == disperser.BlobStatus_CONFIRMED || statusRes.Status == disperser.BlobStatus_FINALIZED {
 			// TODO(eigenlayer): As long as fault proofs are disabled, we can move on once a blob is confirmed
 			// but not yet finalized, without further logic. Once fault proofs are enabled, we will need to update
 			// the proposer to wait until the blob associated with an L2 block has been finalized, i.e. the EigenDA

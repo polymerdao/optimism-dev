@@ -387,7 +387,7 @@ func (l *BatchSubmitter) sendTransaction(txdata txData, queue *txmgr.Queue[txDat
 				FrameRef: &op_service.FrameRef{
 					BatchHeaderHash:      blobInfo.BlobVerificationProof.BatchMetadata.BatchHeaderHash,
 					BlobIndex:            blobInfo.BlobVerificationProof.BlobIndex,
-					ReferenceBlockNumber: blobInfo.BlobVerificationProof.BatchMetadata.ConfirmationBlockNumber,
+					ReferenceBlockNumber: blobInfo.BlobVerificationProof.BatchMetadata.BatchHeader.ReferenceBlockNumber,
 					QuorumIds:            quorumIDs,
 					BlobLength:           uint32(len(txdata.Bytes())),
 				},
