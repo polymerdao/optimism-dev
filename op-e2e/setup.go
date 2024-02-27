@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	customda "github.com/ethereum-optimism/optimism/custom-da"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/batcher"
 	ds "github.com/ipfs/go-datastore"
 	dsSync "github.com/ipfs/go-datastore/sync"
@@ -133,6 +134,7 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
 				Sync:                        sync.Config{SyncMode: sync.CLSync},
+				DaConfig:                    customda.CLIConfig{DaFlag: "default"},
 			},
 			"verifier": {
 				Driver: driver.Config{
@@ -144,6 +146,7 @@ func DefaultSystemConfig(t *testing.T) SystemConfig {
 				RuntimeConfigReloadInterval: time.Minute * 10,
 				ConfigPersistence:           &rollupNode.DisabledConfigPersistence{},
 				Sync:                        sync.Config{SyncMode: sync.CLSync},
+				DaConfig:                    customda.CLIConfig{DaFlag: "default"},
 			},
 		},
 		Loggers: map[string]log.Logger{
@@ -816,6 +819,7 @@ func (cfg SystemConfig) Start(t *testing.T, _opts ...SystemConfigOption) (*Syste
 		Stopped:              sys.Cfg.DisableBatcher, // Batch submitter may be enabled later
 		BatchType:            batchType,
 		DataAvailabilityType: sys.Cfg.DataAvailabilityType,
+		DaConfig:             customda.CLIConfig{DaFlag: "default"},
 	}
 	// Batch Submitter
 	batcher, err := bss.BatcherServiceFromCLIConfig(context.Background(), "0.0.1", batcherCLIConfig, sys.Cfg.Loggers["batcher"])

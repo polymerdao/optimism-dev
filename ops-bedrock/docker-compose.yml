@@ -21,6 +21,9 @@ services:
     image: us-docker.pkg.dev/oplabs-tools-artifacts/images/op-stack-go:devnet
     entrypoint: ["echo", "build complete"]
 
+  da:
+    #TODO: implement the DA service
+
   l1:
     build:
       context: .
@@ -59,6 +62,7 @@ services:
       - op_stack_go_builder
       - l1
       - l2
+      - da
     build:
       context: ../
       dockerfile: ./op-node/Dockerfile
@@ -68,6 +72,7 @@ services:
     command: >
       op-node
       --l1=ws://l1:8546
+      --l1.beacon.ignore
       --l2=http://l2:8551
       --l2.jwt-secret=/config/test-jwt-secret.txt
       --sequencer.enabled
@@ -89,6 +94,9 @@ services:
       --metrics.port=7300
       --pprof.enabled
       --rpc.enable-admin
+      --plasma.enabled
+      --plasma.da-server=da
+      --plasma.da-backend=eigenda
     ports:
       - "7545:8545"
       - "9003:9003"
@@ -163,6 +171,9 @@ services:
       OP_BATCHER_METRICS_ENABLED: "true"
       OP_BATCHER_RPC_ENABLE_ADMIN: "true"
       OP_BATCHER_BATCH_TYPE: 0
+      OP_BATCHER_PLASMA_DA_SERVER: "da"
+      OP_BATCHER_PLASMA_DA_BACKEND: "eigenda"
+      OP_BATCHER_PLASMA_ENABLED: "true"
 
   op-challenger:
     depends_on:
