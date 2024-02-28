@@ -76,7 +76,7 @@ func TestDAClient(t *testing.T) {
 	}
 	require.NoError(t, cfg.Check())
 
-	client := cfg.NewDAClient()
+	client := cfg.NewDAClient(logger)
 
 	rng := rand.New(rand.NewSource(1234))
 

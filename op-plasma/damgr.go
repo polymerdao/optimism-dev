@@ -26,7 +26,7 @@ type Input struct {
 func NewPlasmaDA(log log.Logger, cfg CLIConfig) *DA {
 	return &DA{
 		log:     log,
-		storage: cfg.NewDAClient(),
+		storage: cfg.NewDAClient(log),
 	}
 }
 

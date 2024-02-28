@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
@@ -49,7 +49,7 @@ type DriverSetup struct {
 	EndpointProvider dial.L2EndpointProvider
 	ChannelConfig    ChannelConfig
 	PlasmaDA         plasma.DAStorage
-	DAClient         *customda.DAClient
+	DAClient         *eigenda.DAClient
 }
 
 // BatchSubmitter encapsulates a service responsible for submitting L2 tx

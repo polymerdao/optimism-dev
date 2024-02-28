@@ -7,7 +7,7 @@ import (
 	"math"
 	"time"
 
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-node/flags"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
@@ -75,7 +75,7 @@ type Config struct {
 	// Plasma DA config
 	Plasma plasma.CLIConfig
 
-	DaConfig customda.Config
+	DaConfig eigenda.CLIConfig
 }
 
 type RPCConfig struct {

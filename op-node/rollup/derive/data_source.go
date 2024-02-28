@@ -71,7 +71,7 @@ func (ds *DataSourceFactory) OpenData(ctx context.Context, ref eth.L1BlockRef, b
 		}
 		src = NewBlobDataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ds.blobsFetcher, ref, batcherAddr)
 	} else {
-		src, err = NewCalldataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ref, batcherAddr)
+		src, err = NewCalldataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ref, batcherAddr, ds.dsCfg.plasmaEnabled)
 	}
 	if ds.dsCfg.plasmaEnabled {
 		// plasma([calldata | blobdata](l1Ref)) -> data

@@ -1,11 +1,12 @@
 package driver
 
 import (
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum/go-ethereum/log"
 )
 
-func SetDAClient(cfg customda.Config) error {
-	client := customda.NewDAClient(cfg.DaFlag)
+func SetDAClient(cfg eigenda.CLIConfig, log log.Logger) error {
+	client := eigenda.NewDAClient(&cfg, log)
 	return derive.SetDAClient(client)
 }

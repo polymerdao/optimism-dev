@@ -12,13 +12,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 )
 
-var daClient *customda.DAClient
+var daClient *eigenda.DAClient
 
-func SetDAClient(c *customda.DAClient) error {
+func SetDAClient(c *eigenda.DAClient) error {
 	if daClient != nil {
 		return errors.New("da client already configured")
 	}
@@ -39,33 +39,36 @@ type CalldataSource struct {
 	fetcher L1TransactionFetcher
 	log     log.Logger
 
-	batcherAddr common.Address
+	batcherAddr  common.Address
+	skipDaClient bool
 }
 
 // NewCalldataSource creates a new calldata source. It suppresses errors in fetching the L1 block if they occur.
 // If there is an error, it will attempt to fetch the result on the next call to `Next`.
-func NewCalldataSource(ctx context.Context, log log.Logger, dsCfg DataSourceConfig, fetcher L1TransactionFetcher, ref eth.L1BlockRef, batcherAddr common.Address) (DataIter, error) {
+func NewCalldataSource(ctx context.Context, log log.Logger, dsCfg DataSourceConfig, fetcher L1TransactionFetcher, ref eth.L1BlockRef, batcherAddr common.Address, skipDaClient bool) (DataIter, error) {
 	_, txs, err := fetcher.InfoAndTxsByHash(ctx, ref.Hash)
 	if err != nil {
 		return &CalldataSource{
-			open:        false,
-			ref:         ref,
-			dsCfg:       dsCfg,
-			fetcher:     fetcher,
-			log:         log,
-			batcherAddr: batcherAddr,
+			open:         false,
+			ref:          ref,
+			dsCfg:        dsCfg,
+			fetcher:      fetcher,
+			log:          log,
+			batcherAddr:  batcherAddr,
+			skipDaClient: skipDaClient,
 		}, nil
 	}
 
-	data, err := DataFromEVMTransactions(dsCfg, batcherAddr, txs, log.New("origin", ref))
+	data, err := DataFromEVMTransactions(dsCfg, batcherAddr, txs, log.New("origin", ref), skipDaClient)
 	if err != nil {
 		return &CalldataSource{
-			open:        false,
-			ref:         ref,
-			dsCfg:       dsCfg,
-			fetcher:     fetcher,
-			log:         log,
-			batcherAddr: batcherAddr,
+			open:         false,
+			ref:          ref,
+			dsCfg:        dsCfg,
+			fetcher:      fetcher,
+			log:          log,
+			batcherAddr:  batcherAddr,
+			skipDaClient: skipDaClient,
 		}, err
 	}
 	return &CalldataSource{
@@ -81,7 +84,7 @@ func (ds *CalldataSource) Next(ctx context.Context) (eth.Data, error) {
 	if !ds.open {
 		if _, txs, err := ds.fetcher.InfoAndTxsByHash(ctx, ds.ref.Hash); err == nil {
 			ds.open = true
-			ds.data, err = DataFromEVMTransactions(ds.dsCfg, ds.batcherAddr, txs, ds.log)
+			ds.data, err = DataFromEVMTransactions(ds.dsCfg, ds.batcherAddr, txs, ds.log, ds.skipDaClient)
 			if err != nil {
 				return nil, err
 			}
@@ -103,7 +106,7 @@ func (ds *CalldataSource) Next(ctx context.Context) (eth.Data, error) {
 // DataFromEVMTransactions filters all of the transactions and returns the calldata from transactions
 // that are sent to the batch inbox address from the batch sender address.
 // This will return an empty array if no valid transactions are found.
-func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address, txs types.Transactions, log log.Logger) ([]eth.Data, error) {
+func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address, txs types.Transactions, log log.Logger, skipDaClient bool) ([]eth.Data, error) {
 	out := []eth.Data{}
 	for _, tx := range txs {
 		if isValidBatchTx(tx, dsCfg.l1Signer, dsCfg.batchInboxAddress, batcherAddr) {
@@ -112,11 +115,15 @@ func DataFromEVMTransactions(dsCfg DataSourceConfig, batcherAddr common.Address,
 			case 0:
 				out = append(out, data)
 			default:
-				input, err := daClient.GetInput(context.Background(), data)
-				if err != nil {
-					return nil, err
+				if skipDaClient {
+					out = append(out, data)
+				} else {
+					input, err := daClient.GetInput(context.Background(), data)
+					if err != nil {
+						return nil, err
+					}
+					out = append(out, hexutil.Bytes(input))
 				}
-				out = append(out, hexutil.Bytes(input))
 			}
 		}
 	}

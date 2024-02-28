@@ -6,7 +6,7 @@ import (
 
 	"github.com/urfave/cli/v2"
 
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
 	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 	openum "github.com/ethereum-optimism/optimism/op-service/enum"
@@ -355,7 +355,7 @@ func init() {
 	optionalFlags = append(optionalFlags, DeprecatedFlags...)
 	optionalFlags = append(optionalFlags, opflags.CLIFlags(EnvVarPrefix)...)
 	optionalFlags = append(optionalFlags, plasma.CLIFlags(EnvVarPrefix)...)
-	optionalFlags = append(optionalFlags, customda.CLIFlags(EnvVarPrefix)...)
+	optionalFlags = append(optionalFlags, eigenda.CLIFlags(EnvVarPrefix)...)
 	Flags = append(requiredFlags, optionalFlags...)
 }
 

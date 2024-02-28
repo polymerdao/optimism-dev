@@ -357,7 +357,7 @@ func (n *OpNode) initL1BeaconAPI(ctx context.Context, cfg *Config) error {
 }
 
 func (n *OpNode) initDA(ctx context.Context, cfg *Config) error {
-	return driver.SetDAClient(cfg.DaConfig)
+	return driver.SetDAClient(cfg.DaConfig, n.log)
 }
 
 func (n *OpNode) initL2(ctx context.Context, cfg *Config, snapshotLog log.Logger) error {

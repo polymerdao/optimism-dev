@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
-	customda "github.com/ethereum-optimism/optimism/custom-da"
+	eigenda "github.com/ethereum-optimism/optimism/eigenda"
 	"github.com/ethereum-optimism/optimism/op-batcher/flags"
 	"github.com/ethereum-optimism/optimism/op-batcher/metrics"
 	"github.com/ethereum-optimism/optimism/op-batcher/rpc"
@@ -74,7 +74,7 @@ type BatcherService struct {
 	stopped         atomic.Bool
 
 	NotSubmittingOnStart bool
-	DAClient             *customda.DAClient
+	DAClient             *eigenda.DAClient
 }
 
 // BatcherServiceFromCLIConfig creates a new BatcherService from a CLIConfig.
@@ -122,7 +122,7 @@ func (bs *BatcherService) initFromCLIConfig(ctx context.Context, version string,
 		return fmt.Errorf("failed to init plasma DA: %w", err)
 	}
 	if err := bs.initDA(cfg); err != nil {
-		return fmt.Errorf("failed to start custom-da: %w", err)
+		return fmt.Errorf("failed to start eigenda: %w", err)
 	}
 	bs.initDriver()
 	if err := bs.initRPCServer(cfg); err != nil {
@@ -317,13 +317,13 @@ func (bs *BatcherService) initPlasmaDA(cfg *CLIConfig) error {
 	if err := config.Check(); err != nil {
 		return err
 	}
-	bs.PlasmaDA = config.NewDAClient()
+	bs.PlasmaDA = config.NewDAClient(bs.Log)
 	bs.UsePlasma = config.Enabled
 	return nil
 }
 
 func (bs *BatcherService) initDA(cfg *CLIConfig) error {
-	client := customda.NewDAClient(cfg.DaConfig.DaFlag)
+	client := eigenda.NewDAClient(&cfg.DaConfig, bs.Log)
 	bs.DAClient = client
 	return nil
 }
