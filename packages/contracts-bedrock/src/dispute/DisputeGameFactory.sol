@@ -94,26 +94,26 @@ contract DisputeGameFactory is OwnableUpgradeable, IDisputeGameFactory, ISemver 
         returns (IDisputeGame proxy_)
     {
         // Grab the implementation contract for the given `GameType`.
-        IDisputeGame impl = gameImpls[_gameType];
+        //IDisputeGame impl = gameImpls[_gameType];
 
         // If there is no implementation to clone for the given `GameType`, revert.
-        if (address(impl) == address(0)) revert NoImplementation(_gameType);
+        // if (address(impl) == address(0)) revert NoImplementation(_gameType);
 
         // If the required initialization bond is not met, revert.
-        if (msg.value < initBonds[_gameType]) revert InsufficientBond();
+        //if (msg.value < initBonds[_gameType]) revert InsufficientBond();
 
         // Get the hash of the parent block.
-        bytes32 parentHash = blockhash(block.number - 1);
+        //bytes32 parentHash = blockhash(block.number - 1);
 
         // Clone the implementation contract and initialize it with the given parameters.
-        proxy_ = IDisputeGame(address(impl).clone(abi.encodePacked(_rootClaim, parentHash, _extraData)));
-        proxy_.initialize{ value: msg.value }();
+        //proxy_ = IDisputeGame(address(impl).clone(abi.encodePacked(_rootClaim, parentHash, _extraData)));
+        //proxy_.initialize{ value: msg.value }();
 
         // Compute the unique identifier for the dispute game.
         Hash uuid = getGameUUID(_gameType, _rootClaim, _extraData);
 
         // If a dispute game with the same UUID already exists, revert.
-        if (GameId.unwrap(_disputeGames[uuid]) != bytes32(0)) revert GameAlreadyExists(uuid);
+        //if (GameId.unwrap(_disputeGames[uuid]) != bytes32(0)) revert GameAlreadyExists(uuid);
 
         GameId id = LibGameId.pack(_gameType, Timestamp.wrap(uint64(block.timestamp)), proxy_);
 
