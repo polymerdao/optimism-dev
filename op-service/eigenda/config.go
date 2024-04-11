@@ -5,7 +5,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/urfave/cli/v2"
 )
 
@@ -15,9 +14,6 @@ type Config struct {
 
 	// DaRpc is the HTTP provider URL for the Data Availability node.
 	RPC string
-
-	// Quorum IDs and SecurityParams to use when dispersing and retrieving blobs
-	DisperserSecurityParams []*disperser.SecurityParams
 
 	// The total amount of time that the batcher will spend waiting for EigenDA to confirm a blob
 	StatusQueryTimeout time.Duration
