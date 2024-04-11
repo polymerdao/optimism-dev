@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Layr-Labs/eigenda/api/grpc/disperser"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 
@@ -270,16 +269,9 @@ func (bs *BatcherService) initDriver() {
 }
 
 func (bs *BatcherService) initDA(cfg *CLIConfig) error {
-	disperserSecurityParams := []*disperser.SecurityParams{}
-	disperserSecurityParams = append(disperserSecurityParams, &disperser.SecurityParams{
-		QuorumId:           cfg.DAConfig.PrimaryQuorumID,
-		AdversaryThreshold: cfg.DAConfig.PrimaryAdversaryThreshold,
-		QuorumThreshold:    cfg.DAConfig.PrimaryQuorumThreshold,
-	})
 	bs.DA = &eigenda.EigenDA{
 		Config: eigenda.Config{
 			RPC:                      cfg.DAConfig.RPC,
-			DisperserSecurityParams:  disperserSecurityParams,
 			StatusQueryTimeout:       cfg.DAConfig.StatusQueryTimeout,
 			StatusQueryRetryInterval: cfg.DAConfig.StatusQueryRetryInterval,
 		},
