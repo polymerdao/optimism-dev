@@ -144,6 +144,13 @@ var (
 	}
 	// Legacy Flags
 	SequencerHDPathFlag = txmgr.SequencerHDPathFlag
+
+	PrefixDerivationEnabledFlag = &cli.BoolFlag{
+		Name:    "da-prefix-derivation-enabled",
+		Usage:   "Enable prefix derivation",
+		Value:   false,
+		EnvVars: prefixEnvVars("DA_PREFIX_DERIVATION_ENABLED"),
+	}
 )
 
 var requiredFlags = []cli.Flag{
