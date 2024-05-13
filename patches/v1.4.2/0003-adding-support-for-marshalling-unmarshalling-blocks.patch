@@ -1,0 +1,86 @@
+From 518341f3e2dc7bf88eb06513a740fc9ced1ccf39 Mon Sep 17 00:00:00 2001
+From: jlafiandra6 <jllafiandra96@gmail.com>
+Date: Wed, 24 Jan 2024 10:04:14 -0500
+Subject: [PATCH 3/4] adding support for marshalling/unmarshalling blocks
+
+---
+ op-node/rollup/derive/l1_block_info.go | 21 +++++++++++----------
+ 1 file changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/op-node/rollup/derive/l1_block_info.go b/op-node/rollup/derive/l1_block_info.go
+index 0c43c5509..44c861e20 100644
+--- a/op-node/rollup/derive/l1_block_info.go
++++ b/op-node/rollup/derive/l1_block_info.go
+@@ -20,7 +20,7 @@ import (
+ const (
+ 	L1InfoFuncBedrockSignature = "setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"
+ 	L1InfoFuncEcotoneSignature = "setL1BlockValuesEcotone()"
+-	L1InfoArguments            = 9
++	L1InfoArguments            = 8
+ 	L1InfoBedrockLen           = 4 + 32*L1InfoArguments
+ 	L1InfoEcotoneLen           = 4 + 32*5 // after Ecotone upgrade, args are packed into 5 32-byte slots
+ )
+@@ -50,7 +50,6 @@ type L1BlockInfo struct {
+ 
+ 	L1FeeOverhead eth.Bytes32 // ignored after Ecotone upgrade
+ 	L1FeeScalar   eth.Bytes32 // ignored after Ecotone upgrade
+-	RootHash      common.Hash
+ 
+ 	BlobBaseFee       *big.Int // added by Ecotone upgrade
+ 	BaseFeeScalar     uint32   // added by Ecotone upgrade
+@@ -70,7 +69,6 @@ type L1BlockInfo struct {
+ // | 32      | BatcherHash              |
+ // | 32      | L1FeeOverhead            |
+ // | 32      | L1FeeScalar              |
+-// | 32      | RootHash                 |
+ // +---------+--------------------------+
+ 
+ func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
+@@ -102,9 +100,7 @@ func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
+ 	if err := solabi.WriteEthBytes32(w, info.L1FeeScalar); err != nil {
+ 		return nil, err
+ 	}
+-	if err := solabi.WriteHash(w, info.RootHash); err != nil {
+-		return nil, err
+-	}
++
+ 	return w.Bytes(), nil
+ }
+ 
+@@ -142,9 +138,7 @@ func (info *L1BlockInfo) unmarshalBinaryBedrock(data []byte) error {
+ 	if info.L1FeeScalar, err = solabi.ReadEthBytes32(reader); err != nil {
+ 		return err
+ 	}
+-	if info.RootHash, err = solabi.ReadHash(reader); err != nil {
+-		return err
+-	}
++
+ 	if !solabi.EmptyReader(reader) {
+ 		return errors.New("too many bytes")
+ 	}
+@@ -266,6 +260,14 @@ func L1BlockInfoFromBytes(rollupCfg *rollup.Config, l2BlockTime uint64, data []b
+ 	return &info, info.unmarshalBinaryBedrock(data)
+ }
+ 
++// This is a simple wrapper for marshalling blocks
++func L1BlockInfoToBytes(rollupCfg *rollup.Config, l2BlockTime uint64, block L1BlockInfo) ([]byte, error) {
++	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
++		return block.marshalBinaryEcotone()
++	}
++	return block.marshalBinaryBedrock()
++}
++
+ // L1InfoDeposit creates a L1 Info deposit transaction based on the L1 block,
+ // and the L2 block-height difference with the start of the epoch.
+ func L1InfoDeposit(rollupCfg *rollup.Config, sysCfg eth.SystemConfig, seqNumber uint64, block eth.BlockInfo, l2BlockTime uint64) (*types.DepositTx, error) {
+@@ -276,7 +278,6 @@ func L1InfoDeposit(rollupCfg *rollup.Config, sysCfg eth.SystemConfig, seqNumber
+ 		BlockHash:      block.Hash(),
+ 		SequenceNumber: seqNumber,
+ 		BatcherAddr:    sysCfg.BatcherAddr,
+-		RootHash:       block.Root(),
+ 	}
+ 	var data []byte
+ 	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
+-- 
+2.45.0
+

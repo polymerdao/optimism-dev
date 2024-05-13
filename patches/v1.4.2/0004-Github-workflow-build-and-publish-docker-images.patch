@@ -1,0 +1,84 @@
+From d67634c7e277282dd580c95ce2b15f5f3c0b06fa Mon Sep 17 00:00:00 2001
+From: inkvi <374203+Inkvi@users.noreply.github.com>
+Date: Fri, 2 Feb 2024 18:23:38 -0800
+Subject: [PATCH 4/4] Github workflow build and publish docker images
+
+---
+ .github/workflows/docker-op-stack.yml | 65 +++++++++++++++++++++++++++
+ 1 file changed, 65 insertions(+)
+ create mode 100644 .github/workflows/docker-op-stack.yml
+
+diff --git a/.github/workflows/docker-op-stack.yml b/.github/workflows/docker-op-stack.yml
+new file mode 100644
+index 000000000..795cc814a
+--- /dev/null
++++ b/.github/workflows/docker-op-stack.yml
+@@ -0,0 +1,65 @@
++name: docker-peptide
++
++on:
++  push:
++    tags:
++      - "v*.*.*"
++env:
++  IMAGE_NAME: ghcr.io/polymerdao/optimism
++
++jobs:
++  docker-build-peptide:
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v2
++        with:
++          ref: ${{ github.event.inputs.build-ref }}
++
++      - name: Docker meta
++        id: meta
++        uses: docker/metadata-action@v4
++        with:
++          images: |
++            ${{ env.IMAGE_NAME }}
++          tags: |
++            type=semver,pattern={{raw}}
++          flavor: |
++            latest=false
++          labels: |
++            org.opencontainers.image.source=https://github.com/polymerdao/optimism-dev
++            org.opencontainers.image.title=polymer
++            org.opencontainers.image.url=https://github.com/polymerdao/optimism-dev
++
++      - name: Authenticate Docker
++        uses: docker/login-action@v2
++        with:
++          registry: ghcr.io
++          username: ${{ github.actor }}
++          password: ${{ secrets.GITHUB_TOKEN }}
++
++      - name: Set up Docker Buildx
++        uses: docker/setup-buildx-action@v2
++
++      - name: Build Docker images
++        run: |
++          docker buildx bake \
++          		--progress plain \
++          		--load \
++          		-f docker-bake.hcl \
++          		op-node op-batcher op-proposer op-challenger
++        env:
++          REGISTRY: ghcr.io
++          REPOSITORY: polymerdao/optimism
++          IMAGE_TAGS: ${{ github.ref_name }}
++          GIT_COMMIT: ${{ github.github_sha }}
++
++      - name: Push Docker images
++        run: |
++          IMAGES=("op-node" "op-batcher" "op-proposer" "op-challenger")
++          for image in "${IMAGES[@]}"
++          do
++            echo "Pushing $image"
++            docker push ghcr.io/polymerdao/optimism/$image:${{ github.ref_name }}
++          done
+-- 
+2.45.0
+
