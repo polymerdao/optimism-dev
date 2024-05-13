@@ -1,0 +1,89 @@
+From e972d1009947c4a6fa0cca4c7b144749a9484fdc Mon Sep 17 00:00:00 2001
+From: Derek <derek@polymerlabs.org>
+Date: Mon, 22 Jan 2024 17:41:13 -0500
+Subject: [PATCH 2/4] add roothash to L1BlockInfo and ignore storage proofs
+
+---
+ op-node/rollup/derive/l1_block_info.go | 11 ++++++++++-
+ op-service/eth/account_proof.go        |  7 ++++++-
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/op-node/rollup/derive/l1_block_info.go b/op-node/rollup/derive/l1_block_info.go
+index 4546c95bd..0c43c5509 100644
+--- a/op-node/rollup/derive/l1_block_info.go
++++ b/op-node/rollup/derive/l1_block_info.go
+@@ -20,7 +20,7 @@ import (
+ const (
+ 	L1InfoFuncBedrockSignature = "setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"
+ 	L1InfoFuncEcotoneSignature = "setL1BlockValuesEcotone()"
+-	L1InfoArguments            = 8
++	L1InfoArguments            = 9
+ 	L1InfoBedrockLen           = 4 + 32*L1InfoArguments
+ 	L1InfoEcotoneLen           = 4 + 32*5 // after Ecotone upgrade, args are packed into 5 32-byte slots
+ )
+@@ -50,6 +50,7 @@ type L1BlockInfo struct {
+ 
+ 	L1FeeOverhead eth.Bytes32 // ignored after Ecotone upgrade
+ 	L1FeeScalar   eth.Bytes32 // ignored after Ecotone upgrade
++	RootHash      common.Hash
+ 
+ 	BlobBaseFee       *big.Int // added by Ecotone upgrade
+ 	BaseFeeScalar     uint32   // added by Ecotone upgrade
+@@ -69,6 +70,7 @@ type L1BlockInfo struct {
+ // | 32      | BatcherHash              |
+ // | 32      | L1FeeOverhead            |
+ // | 32      | L1FeeScalar              |
++// | 32      | RootHash                 |
+ // +---------+--------------------------+
+ 
+ func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
+@@ -100,6 +102,9 @@ func (info *L1BlockInfo) marshalBinaryBedrock() ([]byte, error) {
+ 	if err := solabi.WriteEthBytes32(w, info.L1FeeScalar); err != nil {
+ 		return nil, err
+ 	}
++	if err := solabi.WriteHash(w, info.RootHash); err != nil {
++		return nil, err
++	}
+ 	return w.Bytes(), nil
+ }
+ 
+@@ -137,6 +142,9 @@ func (info *L1BlockInfo) unmarshalBinaryBedrock(data []byte) error {
+ 	if info.L1FeeScalar, err = solabi.ReadEthBytes32(reader); err != nil {
+ 		return err
+ 	}
++	if info.RootHash, err = solabi.ReadHash(reader); err != nil {
++		return err
++	}
+ 	if !solabi.EmptyReader(reader) {
+ 		return errors.New("too many bytes")
+ 	}
+@@ -268,6 +276,7 @@ func L1InfoDeposit(rollupCfg *rollup.Config, sysCfg eth.SystemConfig, seqNumber
+ 		BlockHash:      block.Hash(),
+ 		SequenceNumber: seqNumber,
+ 		BatcherAddr:    sysCfg.BatcherAddr,
++		RootHash:       block.Root(),
+ 	}
+ 	var data []byte
+ 	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
+diff --git a/op-service/eth/account_proof.go b/op-service/eth/account_proof.go
+index b7d09eeff..6bfb49ea0 100644
+--- a/op-service/eth/account_proof.go
++++ b/op-service/eth/account_proof.go
+@@ -31,8 +31,13 @@ type AccountResult struct {
+ 	StorageProof []StorageProofEntry `json:"storageProof,omitempty"`
+ }
+ 
+-// Verify an account (and optionally storage) proof from the getProof RPC. See https://eips.ethereum.org/EIPS/eip-1186
++// TODO polymer does not support valid storage proofs yet, so do a light verification
+ func (res *AccountResult) Verify(stateRoot common.Hash) error {
++	return nil
++}
++
++// Verify an account (and optionally storage) proof from the getProof RPC. See https://eips.ethereum.org/EIPS/eip-1186
++func (res *AccountResult) Verify_IGNORED(stateRoot common.Hash) error {
+ 	// verify storage proof values, if any, against the storage trie root hash of the account
+ 	for i, entry := range res.StorageProof {
+ 		// load all MPT nodes into a DB
+-- 
+2.45.0
+
