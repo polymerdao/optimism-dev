@@ -82,12 +82,18 @@ func (o OracleIAVLKeyValueStore) NewBatch() dbm.Batch {
 }
 
 // Set satisfies db.DB
-func (o OracleIAVLKeyValueStore) Set(key []byte, val []byte) error {
+func (o OracleIAVLKeyValueStore) Set(key, val []byte) error {
+	if o.listen != nil {
+		o.listen <- kvPair{key, val}
+	}
 	return o.db.Set(key, val)
 }
 
 // SetSync satisfies db.DB
-func (o OracleIAVLKeyValueStore) SetSync(key []byte, val []byte) error {
+func (o OracleIAVLKeyValueStore) SetSync(key, val []byte) error {
+	if o.listen != nil {
+		o.listen <- kvPair{key, val}
+	}
 	return o.db.SetSync(key, val)
 }
 
@@ -125,11 +131,11 @@ type wrapBatch struct {
 var _ dbm.Batch = wrapBatch{}
 
 // Set satisfies db.Batch
-func (w wrapBatch) Set(key, value []byte) error {
+func (w wrapBatch) Set(key, val []byte) error {
 	if w.listen != nil {
-		w.listen <- kvPair{key, value}
+		w.listen <- kvPair{key, val}
 	}
-	return w.batcher.Set(key, value)
+	return w.batcher.Set(key, val)
 }
 
 // Delete satisfies db.Batch
