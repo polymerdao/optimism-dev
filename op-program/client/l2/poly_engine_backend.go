@@ -2,6 +2,9 @@ package l2
 
 import (
 	"fmt"
+	"github.com/polymerdao/monomer/builder"
+	monoengine "github.com/polymerdao/monomer/engine"
+	"github.com/polymerdao/monomer/mempool"
 	"math/big"
 
 	dbm "github.com/cometbft/cometbft-db"
@@ -18,14 +21,17 @@ import (
 )
 
 type OracleBackedPolymeraseChain struct {
-	log        log.Logger
-	oracle     Oracle
-	chainCfg   *params.ChainConfig
-	engine     consensus.Engine
-	oracleHead *types.Header
-	head       *types.Header
-	safe       *types.Header
-	finalized  *types.Header
+	builder     *builder.Builder
+	txValidator monoengine.TxValidator
+	blockStore  monoengine.BlockStore
+	log         log.Logger
+	oracle      Oracle
+	chainCfg    *params.ChainConfig
+	engine      consensus.Engine
+	oracleHead  *types.Header
+	head        *types.Header
+	safe        *types.Header
+	finalized   *types.Header
 
 	// Block by number cache
 	hashByNum            map[uint64]common.Hash
@@ -39,6 +45,11 @@ type OracleBackedPolymeraseChain struct {
 var _ poly_engineapi.EngineBackend = (*OracleBackedPolymeraseChain)(nil)
 
 func NewOracleBackedPolymeraseChain(logger log.Logger, oracle Oracle, chainCfg *params.ChainConfig, l2OutputRoot common.Hash) (*OracleBackedPolymeraseChain, error) {
+	// create oracle-backed versions of builder, txValidator, and blockStore
+	tmdb := NewOracleBackedIAVLDB(oracle, nil)
+	builder := builder.New(tmdb)
+	mem := mempool.New(tmdb)
+
 	output := oracle.OutputByRoot(l2OutputRoot)
 	outputV0, ok := output.(*eth.OutputV0)
 	if !ok {
