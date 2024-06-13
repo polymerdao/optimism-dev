@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	dbm "github.com/cometbft/cometbft-db"
+	dbm "github.com/cosmos/iavl/db"
 )
 
 const HashSize = sha256.Size
 
 var (
-	_                         dbm.DB = OracleIAVLKeyValueStore{}
+	_                         dbm.DB = &OracleIAVLKeyValueStore{}
 	NodeKeyPrefix                    = []byte{'n'}
 	ErrInvalidLegacyKeyPrefix        = fmt.Errorf("node keys must be prefixed with %x", NodeKeyPrefix)
 )
@@ -81,40 +81,12 @@ func (o OracleIAVLKeyValueStore) NewBatch() dbm.Batch {
 	}
 }
 
-// Set satisfies db.DB
-func (o OracleIAVLKeyValueStore) Set(key, val []byte) error {
-	if o.listen != nil {
-		o.listen <- kvPair{key, val}
+// NewBatchWithSize satisfies db.DB
+func (o OracleIAVLKeyValueStore) NewBatchWithSize(size int) dbm.Batch {
+	return wrapBatch{
+		batcher: o.db.NewBatchWithSize(size),
+		listen:  o.listen,
 	}
-	return o.db.Set(key, val)
-}
-
-// SetSync satisfies db.DB
-func (o OracleIAVLKeyValueStore) SetSync(key, val []byte) error {
-	if o.listen != nil {
-		o.listen <- kvPair{key, val}
-	}
-	return o.db.SetSync(key, val)
-}
-
-// Delete satisfies db.DB
-func (o OracleIAVLKeyValueStore) Delete(key []byte) error {
-	return o.db.Delete(key)
-}
-
-// DeleteSync satisfies db.DB
-func (o OracleIAVLKeyValueStore) DeleteSync(key []byte) error {
-	return o.db.DeleteSync(key)
-}
-
-// Print satisfies db.DB
-func (o OracleIAVLKeyValueStore) Print() error {
-	return o.db.Print()
-}
-
-// Stats satisfies db.DB
-func (o OracleIAVLKeyValueStore) Stats() map[string]string {
-	return o.db.Stats()
 }
 
 type kvPair struct {
@@ -156,4 +128,9 @@ func (w wrapBatch) WriteSync() error {
 // Close satisfies db.Batch
 func (w wrapBatch) Close() error {
 	return w.batcher.Close()
+}
+
+// GetByteSize satisfies db.Batch
+func (w wrapBatch) GetByteSize() (int, error) {
+	return w.batcher.GetByteSize()
 }
