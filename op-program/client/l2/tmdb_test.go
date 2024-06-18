@@ -4,8 +4,9 @@ import (
 	"testing"
 	"time"
 
-	dbm "github.com/cometbft/cometbft-db"
+	log "cosmossdk.io/log"
 	"github.com/cosmos/iavl"
+	dbm "github.com/cosmos/iavl/db"
 
 	"github.com/ethereum-optimism/optimism/op-program/client/l2/test"
 	"github.com/ethereum/go-ethereum/common"
@@ -135,7 +136,7 @@ func TestSupportsIAVLOperations(t *testing.T) {
 
 		time.Sleep(2 * time.Second) // wait to collect all nodes off listen channel
 		testGet(true)
-		rootHash, err := mutableIAVL.Hash()
+		rootHash := mutableIAVL.Hash()
 		require.NoError(t, err)
 
 		v, ok, err := mutableIAVL.Remove(tKey1)
@@ -222,7 +223,7 @@ func TestSupportsIAVLOperations(t *testing.T) {
 
 		time.Sleep(2 * time.Second) // wait to collect all nodes off listen channel
 		testGet(true)
-		rootHash, err := mutableIAVL.Hash()
+		rootHash := mutableIAVL.Hash()
 		require.NoError(t, err)
 
 		v, ok, err := mutableIAVL.Remove(tKey1)
@@ -265,7 +266,5 @@ func TestSupportsIAVLOperations(t *testing.T) {
 
 func setupOracleBackedMutableTree(t *testing.T, oracle *test.StubStateOracle, listen chan kvPair, rootHash []byte) *iavl.MutableTree {
 	iavlDB := NewOracleBackedIAVLDB(oracle, listen)
-	mut, err := iavl.NewMutableTree(iavlDB, 0, false, rootHash, true)
-	require.NoError(t, err)
-	return mut
+	return iavl.NewLegacyMutableTree(iavlDB, 0, true, true, rootHash, log.NewNopLogger())
 }
