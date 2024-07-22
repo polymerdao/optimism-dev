@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching/rpcblock"
+	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 	"github.com/ethereum-optimism/optimism/packages/contracts-bedrock/snapshots"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -31,19 +32,19 @@ var (
 )
 
 type DAChallengeContract interface {
-	GetChallengeWindow()
-	GetResolveWindow()
-	GetBondSize()
-	GetChallenge()
-	GetChallengeStatus()
-	GetBalance()
-	Deposit()
-	Challenge()
-	UnlockBond()
-	Withdraw()
-	ValidateCommitment()
-	ComputeCommitmentKeccak256()
-	Resolve()
+	GetChallengeWindow(ctx context.Context) (*big.Int, error)
+	GetResolveWindow(ctx context.Context) (*big.Int, error)
+	GetBondSize(ctx context.Context) (*big.Int, error)
+	GetChallenge(ctx context.Context, challenge CommitmentArg) (*Challenge, error)
+	GetChallengeStatus(ctx context.Context, challenge CommitmentArg) (ChallengeStatus, error)
+	GetBalance(ctx context.Context, addr common.Address) (*big.Int, error)
+	Deposit(ctx context.Context) (txmgr.TxCandidate, error)
+	Challenge(ctx context.Context, challenge CommitmentArg) (txmgr.TxCandidate, error)
+	UnlockBond(ctx context.Context, challenge CommitmentArg) (txmgr.TxCandidate, error)
+	Withdraw(ctx context.Context) (txmgr.TxCandidate, error)
+	ValidateCommitment(ctx context.Context, commitment []byte) (bool, error)
+	ComputeCommitmentKeccak256(ctx context.Context, blob []byte) ([]byte, error)
+	Resolve(ctx context.Context, challenge CommitmentArg, blob []byte) (txmgr.TxCandidate, error)
 }
 
 var _ DAChallengeContract = &DAChallengeContractLatest{}
@@ -62,6 +63,11 @@ type Challenge struct {
 	ResolvedBlock *big.Int
 }
 
+type CommitmentArg struct {
+	ChallengedBlockNumber *big.Int
+	ChallengedCommitment  []byte
+}
+
 type challenge struct {
 	Challenger    [32]byte
 	LockedBond    [32]byte
@@ -69,14 +75,18 @@ type challenge struct {
 	ResolvedBlock [32]byte
 }
 
-type CommitmentStatus int
+type ChallengeStatus uint64
 
 const (
-	Uninitialized CommitmentStatus = iota
+	Uninitialized ChallengeStatus = iota
 	Active
 	Resolved
 	Expired
 )
+
+func (cs ChallengeStatus) ToUint64() uint64 {
+	return uint64(cs)
+}
 
 type CommitmentType int
 
@@ -105,54 +115,130 @@ func NewDAChallengeContract(ctx context.Context, m metrics.ContractMetricer, add
 	}
 }
 
-func (D DAChallengeContractLatest) GetChallengeWindow() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetChallengeWindow(ctx context.Context) (*big.Int, error) {
+	defer d.metrics.StartContractRequest("GetChallengeWindow")()
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodChallengeWindow))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve challenge window: %w", err)
+	}
+	return res.GetBigInt(0), nil
 }
 
-func (D DAChallengeContractLatest) GetResolveWindow() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetResolveWindow(ctx context.Context) (*big.Int, error) {
+	defer d.metrics.StartContractRequest("GetResolveWindow")()
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodResolveWindow))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve the resolve window: %w", err)
+	}
+	return res.GetBigInt(0), nil
 }
 
-func (D DAChallengeContractLatest) GetBondSize() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetBondSize(ctx context.Context) (*big.Int, error) {
+	defer d.metrics.StartContractRequest("GetBondSize")()
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodBondSize))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve the bond size: %w", err)
+	}
+	return res.GetBigInt(0), nil
 }
 
-func (D DAChallengeContractLatest) GetChallenge() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetChallenge(ctx context.Context, challenge CommitmentArg) (*Challenge, error) {
+	defer d.metrics.StartContractRequest("GetChallenge")()
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodGetChallenge,
+		common.BigToHash(challenge.ChallengedBlockNumber).Bytes(), challenge.ChallengedCommitment))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve the challenge: %w", err)
+	}
+	return &Challenge{
+		Challenger:    res.GetAddress(0),
+		LockedBond:    res.GetBigInt(1),
+		StartBlock:    res.GetBigInt(2),
+		ResolvedBlock: res.GetBigInt(3),
+	}, nil
 }
 
-func (D DAChallengeContractLatest) GetChallengeStatus() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetChallengeStatus(ctx context.Context, challenge CommitmentArg) (ChallengeStatus, error) {
+	defer d.metrics.StartContractRequest("GetChallengeStatus")
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodGetChallengeStatus,
+		common.BigToHash(challenge.ChallengedBlockNumber).Bytes(), challenge.ChallengedCommitment))
+	if err != nil {
+		return 0, fmt.Errorf("failed to retrieve the challenge status: %w", err)
+	}
+	return ChallengeStatus(res.GetUint64(0)), nil
 }
 
-func (D DAChallengeContractLatest) GetBalance() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) GetBalance(ctx context.Context, addr common.Address) (*big.Int, error) {
+	defer d.metrics.StartContractRequest("GetBalance")
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodBalances,
+		addr.Bytes()))
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve the balance: %w", err)
+	}
+	return res.GetBigInt(0), nil
 }
 
-func (D DAChallengeContractLatest) Deposit() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) Deposit(ctx context.Context) (txmgr.TxCandidate, error) {
+	defer d.metrics.StartContractRequest("Deposit")
+	tx, err := d.contract.Call(methodDeposit).ToTxCandidate()
+	if err != nil {
+		return txmgr.TxCandidate{}, fmt.Errorf("failed to create deposit tx: %w", err)
+	}
+	return tx, nil
 }
 
-func (D DAChallengeContractLatest) Challenge() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) Challenge(ctx context.Context, challenge CommitmentArg) (txmgr.TxCandidate, error) {
+	defer d.metrics.StartContractRequest("Challenge")
+	tx, err := d.contract.Call(methodChallenge, common.BigToHash(challenge.ChallengedBlockNumber).Bytes(),
+		challenge.ChallengedCommitment).ToTxCandidate()
+	if err != nil {
+		return txmgr.TxCandidate{}, fmt.Errorf("failed to create challenge tx: %w", err)
+	}
+	return tx, nil
 }
 
-func (D DAChallengeContractLatest) UnlockBond() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) UnlockBond(ctx context.Context, challenge CommitmentArg) (txmgr.TxCandidate, error) {
+	defer d.metrics.StartContractRequest("UnlockBond")
+	tx, err := d.contract.Call(methodUnlockBond, common.BigToHash(challenge.ChallengedBlockNumber).Bytes(),
+		challenge.ChallengedCommitment).ToTxCandidate()
+	if err != nil {
+		return txmgr.TxCandidate{}, fmt.Errorf("failed to create unlock bond tx: %w", err)
+	}
+	return tx, nil
 }
 
-func (D DAChallengeContractLatest) Withdraw() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) Withdraw(ctx context.Context) (txmgr.TxCandidate, error) {
+	defer d.metrics.StartContractRequest("Withdraw")
+	tx, err := d.contract.Call(methodWithdraw).ToTxCandidate()
+	if err != nil {
+		return txmgr.TxCandidate{}, fmt.Errorf("failed to create withdraw tx: %w", err)
+	}
+	return tx, nil
 }
 
-func (D DAChallengeContractLatest) ValidateCommitment() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) ValidateCommitment(ctx context.Context, commitment []byte) (bool, error) {
+	defer d.metrics.StartContractRequest("ValidateCommitment")
+	_, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodValidateCommitment, commitment))
+	if err != nil {
+		return false, fmt.Errorf("failed to validate commitment: %w", err)
+	}
+	return true, nil
 }
 
-func (D DAChallengeContractLatest) ComputeCommitmentKeccak256() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) ComputeCommitmentKeccak256(ctx context.Context, blob []byte) ([]byte, error) {
+	defer d.metrics.StartContractRequest("ComputeCommitmentKeccak256")
+	res, err := d.multiCaller.SingleCall(ctx, rpcblock.Latest, d.contract.Call(methodComputeCommitmentKeccak256, blob))
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute commitment keccak256: %w", err)
+	}
+	return res.GetBytes(0), nil
 }
 
-func (D DAChallengeContractLatest) Resolve() {
-	panic("implement me")
+func (d *DAChallengeContractLatest) Resolve(ctx context.Context, challenge CommitmentArg, blob []byte) (txmgr.TxCandidate, error) {
+	defer d.metrics.StartContractRequest("Resolve")
+	tx, err := d.contract.Call(methodResolve, common.BigToHash(challenge.ChallengedBlockNumber).Bytes(),
+		challenge.ChallengedCommitment, blob).ToTxCandidate()
+	if err != nil {
+		return txmgr.TxCandidate{}, fmt.Errorf("failed to create withdraw tx: %w", err)
+	}
+	return tx, nil
 }

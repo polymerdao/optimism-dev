@@ -25,7 +25,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
-
 )
 
 type Service struct {
@@ -40,10 +39,10 @@ type Service struct {
 	systemClock clock.Clock
 	l1Clock     *clock.SimpleClock
 
-	claimer   *scheduler.BondClaimScheduler
+	claimer *scheduler.BondClaimScheduler
 
 	daChallengeContract *contracts.DAChallengeContract // how to support variable implementations here?
-	rollupClient    *sources.RollupClient
+	rollupClient        *sources.RollupClient
 
 	l1Client   *ethclient.Client
 	pollClient client.RPC

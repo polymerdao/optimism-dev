@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"io"
-	"time"
 
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	"github.com/ethereum-optimism/optimism/op-service/sources/caching"
@@ -75,13 +74,13 @@ type Metrics struct {
 
 	highestActedL1Block prometheus.Gauge
 
-	challenges        prometheus.Counter
-	resolutions       prometheus.Counter
-	succeeded         prometheus.Counter
-	failed            prometheus.Counter
+	challenges  prometheus.Counter
+	resolutions prometheus.Counter
+	succeeded   prometheus.Counter
+	failed      prometheus.Counter
 
-	resolutionTime    prometheus.Histogram
-	challengeTime     prometheus.Histogram
+	resolutionTime prometheus.Histogram
+	challengeTime  prometheus.Histogram
 
 	trackedGames  prometheus.GaugeVec
 	inflightGames prometheus.Gauge

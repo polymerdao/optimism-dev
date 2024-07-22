@@ -2,9 +2,10 @@ package config
 
 import (
 	"errors"
-	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 	"runtime"
 	"time"
+
+	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
@@ -13,19 +14,19 @@ import (
 )
 
 var (
-	ErrMissingDatadir                   = errors.New("missing datadir")
-	ErrMaxConcurrencyZero               = errors.New("max concurrency must not be 0")
-	ErrMissingL1EthRPC                  = errors.New("missing l1 eth rpc url")
-	ErrMissingL1Beacon                  = errors.New("missing l1 beacon url")
-	ErrMissingPlasmaServerRPC        	= errors.New("missing op plasma da server url")
-	ErrMissingBatchInboxAddress 		= errors.New("missing batch inbox address")
-	ErrMissingDAChallengeAddress 		= errors.New("missing da challenge contract address")
-	ErrInvalidDACommitmentType 		    = errors.New("invalid da challenge type")
-	ErrMissingDACommitmentKind 		    = errors.New("missing generic da challenge kind")
+	ErrMissingDatadir            = errors.New("missing datadir")
+	ErrMaxConcurrencyZero        = errors.New("max concurrency must not be 0")
+	ErrMissingL1EthRPC           = errors.New("missing l1 eth rpc url")
+	ErrMissingL1Beacon           = errors.New("missing l1 beacon url")
+	ErrMissingPlasmaServerRPC    = errors.New("missing op plasma da server url")
+	ErrMissingBatchInboxAddress  = errors.New("missing batch inbox address")
+	ErrMissingDAChallengeAddress = errors.New("missing da challenge contract address")
+	ErrInvalidDACommitmentType   = errors.New("invalid da challenge type")
+	ErrMissingDACommitmentKind   = errors.New("missing generic da challenge kind")
 )
 
 const (
-	DefaultPollInterval         = time.Second * 12
+	DefaultPollInterval = time.Second * 12
 	DefaultMaxPendingTx = 10
 )
 
@@ -33,15 +34,15 @@ const (
 // This also contains config options for auxiliary services.
 // It is used to initialize the challenger.
 type Config struct {
-	L1EthRpc             string           // L1 RPC Url
-	L1Beacon             string           // L1 Beacon API Url
-	PlasmaServerRpc      string			  // Plasma DA server Url
-	BatchInboxAddress    common.Address   // Address of the dispute game factory
-	DAChallengeAddress   common.Address
-	BatcherAddresses     []common.Address // Allowed batch submitters, ignore all other
-	Datadir              string           // Data Directory
-	MaxConcurrency       uint             // Maximum number of threads to use when progressing games
-	PollInterval         time.Duration    // Polling interval for latest-block subscription when using an HTTP RPC provider
+	L1EthRpc           string         // L1 RPC Url
+	L1Beacon           string         // L1 Beacon API Url
+	PlasmaServerRpc    string         // Plasma DA server Url
+	BatchInboxAddress  common.Address // Address of the dispute game factory
+	DAChallengeAddress common.Address
+	BatcherAddresses   []common.Address // Allowed batch submitters, ignore all other
+	Datadir            string           // Data Directory
+	MaxConcurrency     uint             // Maximum number of threads to use when progressing games
+	PollInterval       time.Duration    // Polling interval for latest-block subscription when using an HTTP RPC provider
 
 	MaxPendingTx uint64 // Maximum number of pending transactions (0 == no limit)
 
