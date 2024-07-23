@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	contractMetrics "github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
+	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching/rpcblock"
 	batchingTest "github.com/ethereum-optimism/optimism/op-service/sources/batching/test"
@@ -47,17 +48,18 @@ var (
 	lockedBond               = big.NewInt(3000)
 	startBlock               = big.NewInt(20000000)
 	resolvedBlock            = big.NewInt(20010000)
-	status                   = Resolved
+	status                   = types.Resolved
 	blob                     = make([]byte, 32*4096)
 	_, _                     = rnd.Read(blob)
 	challengeHeight          = big.NewInt(19999999)
 	commitment               = crypto.Keccak256(blob)
-	prefixedCommitment       = append([]byte{uint8(Keccak256)}, commitment...)
-	comm                     = CommitmentArg{
+	prefixedCommitment       = append([]byte{uint8(types.Keccak256)}, commitment...)
+	comm                     = types.CommitmentArg{
 		ChallengedBlockNumber: challengeHeight,
 		ChallengedCommitment:  prefixedCommitment,
 	}
-	chal = &Challenge{
+	chal = &types.Challenge{
+		CommitmentArg: comm,
 		Challenger:    challengerAddr,
 		LockedBond:    lockedBond,
 		StartBlock:    startBlock,
@@ -130,7 +132,7 @@ func TestSimpleGetters(t *testing.T) {
 		{
 			methodAlias: "getChallengeStatus",
 			method:      methodGetChallengeStatus,
-			result:      Resolved,
+			result:      types.Resolved,
 			expected:    status,
 			call: func(game DAChallengeContract) (any, error) {
 				return game.GetChallengeStatus(context.Background(), comm)
@@ -186,6 +188,7 @@ func TestGetChallenge(t *testing.T) {
 
 			actual, err := dac.GetChallenge(context.Background(), comm)
 			require.NoError(t, err)
+			require.Equal(t, chal.ChallengedCommitment, chal)
 			require.Equal(t, chal.Challenger, actual.Challenger)
 			require.Equal(t, chal.LockedBond, actual.LockedBond)
 			require.Equal(t, chal.StartBlock, actual.StartBlock)
