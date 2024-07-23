@@ -7,15 +7,15 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type Withdrawer interface {
-	Withdraw(ctx context.Context) error
+type BondWithdrawer interface {
+	WithdrawBonds(ctx context.Context, height uint64) (err error)
 }
 
 type WithdrawScheduler struct {
 	log        log.Logger
 	metrics    WithdrawSchedulerMetrics
 	ch         chan withdrawMessage
-	withdrawer Withdrawer
+	withdrawer BondWithdrawer
 	cancel     func()
 	wg         sync.WaitGroup
 }
@@ -28,7 +28,7 @@ type withdrawMessage struct {
 	blockNumber uint64
 }
 
-func NewWithdrawScheduler(logger log.Logger, metrics WithdrawSchedulerMetrics, withdrawer Withdrawer) *WithdrawScheduler {
+func NewWithdrawScheduler(logger log.Logger, metrics WithdrawSchedulerMetrics, withdrawer BondWithdrawer) *WithdrawScheduler {
 	return &WithdrawScheduler{
 		log:        logger,
 		metrics:    metrics,
@@ -57,7 +57,7 @@ func (s *WithdrawScheduler) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-s.ch:
-			if err := s.withdrawer.Withdraw(ctx); err != nil {
+			if err := s.withdrawer.WithdrawBonds(ctx, msg.blockNumber); err != nil {
 				s.metrics.RecordWithdrawFailed()
 				s.log.Error("Failed to claim bonds", "blockNumber", msg.blockNumber, "err", err)
 			}

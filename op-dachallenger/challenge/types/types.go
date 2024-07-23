@@ -38,7 +38,7 @@ type Challenge struct {
 	ResolvedBlock *big.Int
 }
 
-type MoveData struct {
+type ResolveData struct {
 	CommitmentArg
 	Blob []byte
 }

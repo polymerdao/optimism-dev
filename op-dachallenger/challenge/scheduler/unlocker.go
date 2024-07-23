@@ -11,29 +11,23 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type TxSender interface {
-	SendAndWaitSimple(txPurpose string, txs ...txmgr.TxCandidate) error
-}
-
 type BondContract interface {
 	UnlockBond(ctx context.Context, challenge types.CommitmentArg) (txmgr.TxCandidate, error)
 }
 
-type BondContractCreator func(game types.CommitmentArg) (BondContract, error)
-
 type Unlocker struct {
-	logger          log.Logger
-	contractCreator BondContractCreator
-	txSender        TxSender
+	logger   log.Logger
+	contract BondContract
+	txSender TxSender
 }
 
 var _ BondUnlocker = (*Unlocker)(nil)
 
-func NewBondClaimer(l log.Logger, contractCreator BondContractCreator, txSender TxSender) *Unlocker {
+func NewBondUnlocker(l log.Logger, contract BondContract, txSender TxSender) *Unlocker {
 	return &Unlocker{
-		logger:          l,
-		contractCreator: contractCreator,
-		txSender:        txSender,
+		logger:   l,
+		contract: contract,
+		txSender: txSender,
 	}
 }
 
@@ -48,12 +42,7 @@ func (c *Unlocker) unlockBond(ctx context.Context, challenge types.CommitmentArg
 	c.logger.Debug("Attempting to unlock bonds for", "blockheight", challenge.ChallengedBlockNumber,
 		"commitment", challenge.ChallengedCommitment)
 
-	contract, err := c.contractCreator(challenge)
-	if err != nil {
-		return fmt.Errorf("failed to create bond contract: %w", err)
-	}
-
-	candidate, err := contract.UnlockBond(ctx, challenge)
+	candidate, err := c.contract.UnlockBond(ctx, challenge)
 	if errors.Is(err, contracts.ErrSimulationFailed) {
 		c.logger.Debug("Bond is still locked", "height", challenge.ChallengedBlockNumber,
 			"commitment", challenge.ChallengedCommitment)

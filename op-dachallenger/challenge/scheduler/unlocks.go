@@ -15,7 +15,7 @@ type BondUnlocker interface {
 type BondUnlockScheduler struct {
 	log      log.Logger
 	metrics  BondUnlockSchedulerMetrics
-	ch       chan schedulerMessage
+	ch       chan unlockMessage
 	unlocker BondUnlocker
 	cancel   func()
 	wg       sync.WaitGroup
@@ -25,16 +25,16 @@ type BondUnlockSchedulerMetrics interface {
 	RecordBondUnlockFailed()
 }
 
-type schedulerMessage struct {
+type unlockMessage struct {
 	blockNumber uint64
 	challenges  []types.CommitmentArg
 }
 
-func NewBondClaimScheduler(logger log.Logger, metrics BondUnlockSchedulerMetrics, unlocker BondUnlocker) *BondUnlockScheduler {
+func NewBondUnlockScheduler(logger log.Logger, metrics BondUnlockSchedulerMetrics, unlocker BondUnlocker) *BondUnlockScheduler {
 	return &BondUnlockScheduler{
 		log:      logger,
 		metrics:  metrics,
-		ch:       make(chan schedulerMessage, 1),
+		ch:       make(chan unlockMessage, 1),
 		unlocker: unlocker,
 	}
 }
@@ -69,7 +69,7 @@ func (s *BondUnlockScheduler) run(ctx context.Context) {
 
 func (s *BondUnlockScheduler) Schedule(blockNumber uint64, challenges []types.CommitmentArg) error {
 	select {
-	case s.ch <- schedulerMessage{blockNumber, challenges}:
+	case s.ch <- unlockMessage{blockNumber, challenges}:
 	default:
 		s.log.Trace("Skipping game bond claim while claiming in progress")
 	}
