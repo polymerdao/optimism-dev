@@ -41,7 +41,7 @@ type Service struct {
 
 	claimer *scheduler.BondClaimScheduler
 
-	daChallengeContract *contracts.DAChallengeContract // how to support variable implementations here?
+	daChallengeContract contracts.DAChallengeContract // how to support variable implementations here?
 	rollupClient        *sources.RollupClient
 
 	l1Client   *ethclient.Client
@@ -170,8 +170,11 @@ func (s *Service) initMetricsServer(cfg *opmetrics.CLIConfig) error {
 }
 
 func (s *Service) initDAChallengeContract(cfg *config.Config) error {
-	daChallengeContract := contracts.NewDAChallengeContract(s.metrics, cfg.DAChallengeAddress,
+	daChallengeContract, err := contracts.NewDAChallengeContract(context.Background(), s.metrics, cfg.DAChallengeAddress,
 		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+	if err != nil {
+		return err
+	}
 	s.daChallengeContract = daChallengeContract
 	return nil
 }

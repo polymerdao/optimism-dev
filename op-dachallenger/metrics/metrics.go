@@ -41,8 +41,9 @@ type Metricer interface {
 	RecordDAChallengeResolutionTime(t float64)
 	RecordDAChallengeTime(t float64)
 
-	RecordBondClaimFailed()
-	RecordBondClaimed(amount uint64)
+	RecordBondUnlockFailed()
+
+	RecordWithdrawFailed()
 
 	RecordGamesStatus(inProgress, defenderWon, challengerWon int)
 
@@ -237,6 +238,16 @@ func (m *Metrics) RecordDAChallengeResolutionTime(t float64) {
 }
 
 func (m *Metrics) RecordDAChallengeTime(t float64) {
+	panic("implement me")
+}
+
+func (m *Metrics) RecordWithdrawFailed() {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *Metrics) RecordBondUnlockFailed() {
+	//TODO implement me
 	panic("implement me")
 }
 
