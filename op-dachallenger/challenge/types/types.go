@@ -3,6 +3,7 @@ package types
 import (
 	"math/big"
 
+	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -65,6 +66,10 @@ type Action struct {
 	// Existing challenge, if this is a resolve action
 	Challenge Challenge
 
-	// Move data, if this is a challenge action
-	MoveData MoveData
+	// Resolve data, if this is a challenge action
+	ResolveData ResolveData
+}
+
+type TxSender interface {
+	SendAndWaitSimple(txPurpose string, txs ...txmgr.TxCandidate) error
 }

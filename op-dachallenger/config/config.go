@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ethereum-optimism/optimism/op-service/sources"
+
 	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
@@ -14,7 +16,6 @@ import (
 )
 
 var (
-	ErrMissingDatadir            = errors.New("missing datadir")
 	ErrMaxConcurrencyZero        = errors.New("max concurrency must not be 0")
 	ErrMissingL1EthRPC           = errors.New("missing l1 eth rpc url")
 	ErrMissingL1Beacon           = errors.New("missing l1 beacon url")
@@ -30,19 +31,27 @@ const (
 	DefaultMaxPendingTx = 10
 )
 
+type CommitmentKind uint
+
+const (
+	Undefined CommitmentKind = iota
+	EigenDA
+)
+
 // Config is a well typed config that is parsed from the CLI params.
 // This also contains config options for auxiliary services.
 // It is used to initialize the challenger.
 type Config struct {
-	L1EthRpc           string         // L1 RPC Url
-	L1Beacon           string         // L1 Beacon API Url
-	PlasmaServerRpc    string         // Plasma DA server Url
-	BatchInboxAddress  common.Address // Address of the dispute game factory
-	DAChallengeAddress common.Address
-	BatcherAddresses   []common.Address // Allowed batch submitters, ignore all other
-	Datadir            string           // Data Directory
-	MaxConcurrency     uint             // Maximum number of threads to use when progressing games
-	PollInterval       time.Duration    // Polling interval for latest-block subscription when using an HTTP RPC provider
+	L1EthRpc            string         // L1 RPC Url
+	L1Beacon            string         // L1 Beacon API Url
+	PlasmaServerRpc     string         // Plasma DA server Url
+	BatchInboxAddress   common.Address // Address of the dispute game factory
+	DAChallengeAddress  common.Address
+	BatcherAddresses    []common.Address // Allowed batch submitters, ignore all other
+	MaxConcurrency      uint             // Maximum number of threads to use when progressing games
+	PollInterval        time.Duration    // Polling interval for latest-block subscription when using an HTTP RPC provider
+	L1ClientConfig      *sources.L1ClientConfig
+	L1EpochPollInterval time.Duration
 
 	MaxPendingTx uint64 // Maximum number of pending transactions (0 == no limit)
 
@@ -51,7 +60,10 @@ type Config struct {
 	PprofConfig   oppprof.CLIConfig
 
 	CommitmentType plasma.CommitmentType
-	CommitmentKind string
+	CommitmentKind CommitmentKind
+
+	CLIConfig    plasma.CLIConfig
+	PlasmaConfig plasma.Config
 }
 
 func NewConfig(
@@ -60,20 +72,25 @@ func NewConfig(
 	l1EthRpc string,
 	l1BeaconApi string,
 	plasmaRPC string,
-	datadir string,
 	batcherAddrs []common.Address,
 	commitmentType plasma.CommitmentType,
-	commitmentKind string,
+	commitmentKind CommitmentKind,
+	l1ClientConfig *sources.L1ClientConfig,
+	l1EpochPollInterval time.Duration,
+	plasmaCLIConfig plasma.CLIConfig,
+	plasmaConfig plasma.Config,
 ) Config {
 	return Config{
-		L1EthRpc:           l1EthRpc,
-		L1Beacon:           l1BeaconApi,
-		PlasmaServerRpc:    plasmaRPC,
-		BatchInboxAddress:  batchInboxAddress,
-		BatcherAddresses:   batcherAddrs,
-		DAChallengeAddress: daChallengeAddress,
-		MaxConcurrency:     uint(runtime.NumCPU()),
-		PollInterval:       DefaultPollInterval,
+		L1EthRpc:            l1EthRpc,
+		L1Beacon:            l1BeaconApi,
+		PlasmaServerRpc:     plasmaRPC,
+		BatchInboxAddress:   batchInboxAddress,
+		BatcherAddresses:    batcherAddrs,
+		DAChallengeAddress:  daChallengeAddress,
+		MaxConcurrency:      uint(runtime.NumCPU()),
+		PollInterval:        DefaultPollInterval,
+		L1ClientConfig:      l1ClientConfig,
+		L1EpochPollInterval: l1EpochPollInterval,
 
 		MaxPendingTx: DefaultMaxPendingTx,
 
@@ -81,10 +98,11 @@ func NewConfig(
 		MetricsConfig: opmetrics.DefaultCLIConfig(),
 		PprofConfig:   oppprof.DefaultCLIConfig(),
 
-		Datadir: datadir,
-
 		CommitmentType: commitmentType,
 		CommitmentKind: commitmentKind,
+
+		CLIConfig:    plasmaCLIConfig,
+		PlasmaConfig: plasmaConfig,
 	}
 }
 
@@ -108,12 +126,9 @@ func (c Config) Check() error {
 		return ErrInvalidDACommitmentType
 	}
 	if c.CommitmentType == plasma.GenericCommitmentType {
-		if c.CommitmentKind == "" {
+		if c.CommitmentKind == Undefined {
 			return ErrMissingDACommitmentKind
 		}
-	}
-	if c.Datadir == "" {
-		return ErrMissingDatadir
 	}
 	if c.MaxConcurrency == 0 {
 		return ErrMaxConcurrencyZero
