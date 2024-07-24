@@ -7,6 +7,8 @@ import (
 	"io"
 	"sync/atomic"
 
+	plasma "github.com/ethereum-optimism/optimism/op-plasma"
+
 	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
@@ -28,10 +30,10 @@ import (
 )
 
 type Service struct {
-	logger  log.Logger
-	metrics metrics.Metricer
-	monitor *gameMonitor
-	sched   *scheduler.Scheduler
+	logger     log.Logger
+	metrics    metrics.Metricer
+	monitor    *gameMonitor
+	cordinator *scheduler.Coordinator
 
 	txMgr    *txmgr.SimpleTxManager
 	txSender *sender.TxSender
@@ -39,13 +41,17 @@ type Service struct {
 	systemClock clock.Clock
 	l1Clock     *clock.SimpleClock
 
-	claimer *scheduler.BondClaimScheduler
+	claimer    *scheduler.BondUnlockScheduler
+	withdrawer *scheduler.WithdrawScheduler
+	resolver   *scheduler.ResolveScheduler
+	challenger *scheduler.ChallengeScheduler
 
 	daChallengeContract contracts.DAChallengeContract // how to support variable implementations here?
 	rollupClient        *sources.RollupClient
 
 	l1Client   *ethclient.Client
 	pollClient client.RPC
+	damgr      plasma.DA
 
 	pprofService *oppprof.Service
 	metricsSrv   *httputil.HTTPServer
@@ -91,11 +97,17 @@ func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error 
 	if err := s.initDAChallengeContract(cfg); err != nil {
 		return fmt.Errorf("failed to create da challenge contract bindings: %w", err)
 	}
-	if err := s.initBondClaims(); err != nil {
-		return fmt.Errorf("failed to init bond claiming: %w", err)
+	if err := s.initBondUnlocker(); err != nil {
+		return fmt.Errorf("failed to init bond unlocker: %w", err)
 	}
-	if err := s.initScheduler(cfg); err != nil {
-		return fmt.Errorf("failed to init scheduler: %w", err)
+	if err := s.initBondWithdrawer(); err != nil {
+		return fmt.Errorf("failed to init bond withdrawer: %w", err)
+	}
+	if err := s.initChallengeResolver(); err != nil {
+		return fmt.Errorf("failed to init challenge resolver: %w", err)
+	}
+	if err := s.initCommitmentChallenger(); err != nil {
+		return fmt.Errorf("failed to init commitment challenger: %w", err)
 	}
 
 	s.initMonitor(cfg)
@@ -122,6 +134,10 @@ func (s *Service) initL1Client(ctx context.Context, cfg *config.Config) error {
 	}
 	s.l1Client = l1Client
 	return nil
+}
+
+func (s *Service) initDAManager(ctx context.Context, cfg *config.Config) error {
+	// TODO: initialize the damgr
 }
 
 func (s *Service) initPollClient(ctx context.Context, cfg *config.Config) error {
@@ -179,13 +195,31 @@ func (s *Service) initDAChallengeContract(cfg *config.Config) error {
 	return nil
 }
 
-func (s *Service) initBondClaims() error {
-	claimer := scheduler.NewBondClaimer(s.logger, s.metrics, s.registry.CreateBondContract, s.txSender, s.claimants...)
-	s.claimer = scheduler.NewBondClaimScheduler(s.logger, s.metrics, claimer)
+func (s *Service) initBondUnlocker() error {
+	claimer := scheduler.NewBondUnlocker(s.logger, s.registry.CreateBondContract, s.txSender)
+	s.claimer = scheduler.NewBondUnlockScheduler(s.logger, s.metrics, claimer)
 	return nil
 }
 
-func (s *Service) initScheduler(cfg *config.Config) error {
+func (s *Service) initBondWithdrawer() error {
+	withdrawer := scheduler.NewBondWithdrawer(s.logger, s.registry.CreateWithdrawContract, s.txSender)
+	s.withdrawer = scheduler.NewWithdrawScheduler(s.logger, s.metrics, withdrawer)
+	return nil
+}
+
+func (s *Service) initChallengeResolver() error {
+	resolver := scheduler.NewResolver(s.logger, s.registry.CreateResolverContract, s.txSender)
+	s.resolver = scheduler.NewResolveScheduler(s.logger, s.metrics, resolver)
+	return nil
+}
+
+func (s *Service) initCommitmentChallenger() error {
+	challenger := scheduler.NewChallenger(s.logger, s.registry.CreateChallengerContract, s.txSender)
+	s.challenger = scheduler.NewResolveScheduler(s.logger, s.metrics, challenger)
+	return nil
+}
+
+func (s *Service) initCordinator(cfg *config.Config) error {
 	disk := newDiskManager(cfg.Datadir)
 	s.sched = scheduler.NewScheduler(s.logger, s.metrics, disk, cfg.MaxConcurrency, s.registry.CreatePlayer, cfg.AllowInvalidPrestate)
 	return nil
@@ -197,7 +231,7 @@ func (s *Service) initMonitor(cfg *config.Config) {
 
 func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting scheduler")
-	s.sched.Start(ctx)
+	s.cordinator.Start(ctx)
 	s.claimer.Start(ctx)
 	s.logger.Info("starting monitoring")
 	s.monitor.StartMonitoring()
@@ -213,9 +247,9 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.logger.Info("stopping challenger game service")
 
 	var result error
-	if s.sched != nil {
-		if err := s.sched.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("failed to close scheduler: %w", err))
+	if s.cordinator != nil {
+		if err := s.coordinator.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("failed to close coordinator: %w", err))
 		}
 	}
 	if s.monitor != nil {
@@ -224,6 +258,21 @@ func (s *Service) Stop(ctx context.Context) error {
 	if s.claimer != nil {
 		if err := s.claimer.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close claimer: %w", err))
+		}
+	}
+	if s.withdrawer != nil {
+		if err := s.withdrawer.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("failed to close withdrawer: %w", err))
+		}
+	}
+	if s.resolver != nil {
+		if err := s.resolver.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("failed to close resolver: %w", err))
+		}
+	}
+	if s.challenger != nil {
+		if err := s.challenger.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("failed to close challenger: %w", err))
 		}
 	}
 	if s.pprofService != nil {
