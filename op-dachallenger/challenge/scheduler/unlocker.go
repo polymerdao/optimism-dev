@@ -6,24 +6,30 @@ import (
 	"fmt"
 
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts"
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type BondContract interface {
+type UnlockContract interface {
 	UnlockBond(ctx context.Context, challenge types.CommitmentArg) (txmgr.TxCandidate, error)
 }
 
+type UnlockerContractCreator func(ctx context.Context, m metrics.ContractMetricer,
+	addr common.Address, caller *batching.MultiCaller) (UnlockContract, error)
+
 type Unlocker struct {
 	logger   log.Logger
-	contract BondContract
-	txSender TxSender
+	contract UnlockContract
+	txSender types.TxSender
 }
 
 var _ BondUnlocker = (*Unlocker)(nil)
 
-func NewBondUnlocker(l log.Logger, contract BondContract, txSender TxSender) *Unlocker {
+func NewBondUnlocker(l log.Logger, contract UnlockContract, txSender types.TxSender) *Unlocker {
 	return &Unlocker{
 		logger:   l,
 		contract: contract,

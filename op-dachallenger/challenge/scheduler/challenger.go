@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -14,15 +17,18 @@ type ChallengeContract interface {
 	Challenge(ctx context.Context, challenge types.CommitmentArg) (txmgr.TxCandidate, error)
 }
 
+type ChallengeContractCreator func(ctx context.Context, m metrics.ContractMetricer,
+	addr common.Address, caller *batching.MultiCaller) (ChallengeContract, error)
+
 type Challenger struct {
 	logger   log.Logger
 	contract ChallengeContract
-	txSender TxSender
+	txSender types.TxSender
 }
 
 var _ Challenging = (*Challenger)(nil)
 
-func NewChallenger(l log.Logger, contract ChallengeContract, txSender TxSender) *Challenger {
+func NewChallenger(l log.Logger, contract ChallengeContract, txSender types.TxSender) *Challenger {
 	return &Challenger{
 		logger:   l,
 		contract: contract,

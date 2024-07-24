@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -14,15 +17,18 @@ type ResolveContract interface {
 	Resolve(ctx context.Context, challenge types.CommitmentArg, blob []byte) (txmgr.TxCandidate, error)
 }
 
+type ResolveContractCreator func(ctx context.Context, m metrics.ContractMetricer,
+	addr common.Address, caller *batching.MultiCaller) (ResolveContract, error)
+
 type Resolver struct {
 	logger   log.Logger
 	contract ResolveContract
-	txSender TxSender
+	txSender types.TxSender
 }
 
 var _ Resolving = (*Resolver)(nil)
 
-func NewResolver(l log.Logger, contract ResolveContract, txSender TxSender) *Resolver {
+func NewResolver(l log.Logger, contract ResolveContract, txSender types.TxSender) *Resolver {
 	return &Resolver{
 		logger:   l,
 		contract: contract,

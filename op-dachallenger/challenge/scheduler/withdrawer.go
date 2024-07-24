@@ -4,7 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
+
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -12,15 +17,18 @@ type WithdrawContract interface {
 	Withdraw(ctx context.Context) (txmgr.TxCandidate, error)
 }
 
+type WithdrawContractCreator func(ctx context.Context, m metrics.ContractMetricer,
+	addr common.Address, caller *batching.MultiCaller) (WithdrawContract, error)
+
 type Withdrawer struct {
 	logger   log.Logger
 	contract WithdrawContract
-	txSender TxSender
+	txSender types.TxSender
 }
 
 var _ BondWithdrawer = (*Withdrawer)(nil)
 
-func NewBondWithdrawer(l log.Logger, contract WithdrawContract, txSender TxSender) *Withdrawer {
+func NewBondWithdrawer(l log.Logger, contract WithdrawContract, txSender types.TxSender) *Withdrawer {
 	return &Withdrawer{
 		logger:   l,
 		contract: contract,
