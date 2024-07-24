@@ -2,6 +2,8 @@ package config
 
 import (
 	"errors"
+	"github.com/ethereum-optimism/optimism/op-node/node"
+	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"runtime"
 	"time"
 
@@ -42,9 +44,10 @@ const (
 // This also contains config options for auxiliary services.
 // It is used to initialize the challenger.
 type Config struct {
-	L1EthRpc            string         // L1 RPC Url
-	L1Beacon            string         // L1 Beacon API Url
-	PlasmaServerRpc     string         // Plasma DA server Url
+	L1EthRpc            string // L1 RPC Url
+	L1Beacon            string // L1 Beacon API Url
+	PlasmaServerRpc     string // Plasma DA server Url
+
 	BatchInboxAddress   common.Address // Address of the dispute game factory
 	DAChallengeAddress  common.Address
 	BatcherAddresses    []common.Address // Allowed batch submitters, ignore all other
@@ -62,8 +65,10 @@ type Config struct {
 	CommitmentType plasma.CommitmentType
 	CommitmentKind CommitmentKind
 
-	CLIConfig    plasma.CLIConfig
-	PlasmaConfig plasma.Config
+	CLIConfig    *plasma.CLIConfig
+	PlasmaConfig *plasma.Config
+	RollupConfig *rollup.Config
+	BlobSourceConfig *node.L1BeaconEndpointConfig
 }
 
 func NewConfig(
@@ -77,8 +82,10 @@ func NewConfig(
 	commitmentKind CommitmentKind,
 	l1ClientConfig *sources.L1ClientConfig,
 	l1EpochPollInterval time.Duration,
-	plasmaCLIConfig plasma.CLIConfig,
-	plasmaConfig plasma.Config,
+	plasmaCLIConfig *plasma.CLIConfig,
+	plasmaConfig *plasma.Config,
+	rollupConfig *rollup.Config,
+	blobSourceConfig *node.L1BeaconEndpointConfig,
 ) Config {
 	return Config{
 		L1EthRpc:            l1EthRpc,
@@ -103,6 +110,8 @@ func NewConfig(
 
 		CLIConfig:    plasmaCLIConfig,
 		PlasmaConfig: plasmaConfig,
+		RollupConfig: rollupConfig,
+		BlobSourceConfig: blobSourceConfig,
 	}
 }
 
@@ -129,6 +138,24 @@ func (c Config) Check() error {
 		if c.CommitmentKind == Undefined {
 			return ErrMissingDACommitmentKind
 		}
+	}
+	if c.L1ClientConfig == nil {
+		return ErrMissingL1ClientConfig
+	}
+	if c.L1EpochPollInterval == 0 {
+		c.L1EpochPollInterval = DefaultL1EpochPollInterval
+	}
+	if c.PlasmaConfig == nil {
+		return ErrMissingPlasmaConfig
+	}
+	if c.CLIConfig == nil {
+		return ErrMissingPlasmaCLIConfig
+	}
+	if c.RollupConfig == nil {
+		return ErrMissingRollupConfig
+	}
+	if c.BlobSourceConfig == nil {
+		return ErrMissingBlobSourceConfig
 	}
 	if c.MaxConcurrency == 0 {
 		return ErrMaxConcurrencyZero

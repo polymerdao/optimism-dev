@@ -3,6 +3,8 @@ package metrics
 import (
 	"io"
 
+	"github.com/ethereum-optimism/optimism/op-service/eth"
+
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	"github.com/ethereum-optimism/optimism/op-service/sources/caching"
 	"github.com/ethereum/go-ethereum/common"
@@ -51,6 +53,9 @@ type Metricer interface {
 	DecActiveExecutors()
 	IncIdleExecutors()
 	DecIdleExecutors()
+
+	RecordL1ReorgDepth(d uint64)
+	RecordL1Ref(name string, ref eth.L1BlockRef)
 }
 
 // Metrics implementation must implement RegistryMetricer to allow the metrics server to work.
@@ -211,6 +216,16 @@ func (m *Metrics) RecordInfo(version string) {
 func (m *Metrics) RecordUp() {
 	prometheus.MustRegister()
 	m.up.Set(1)
+}
+
+func (m *Metrics) RecordL1ReorgDepth(d uint64) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *Metrics) RecordL1Ref(name string, ref eth.L1BlockRef) {
+	//TODO implement me
+	panic("implement me")
 }
 
 func (m *Metrics) Document() []opmetrics.DocumentedMetric {

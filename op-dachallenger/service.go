@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
+	"github.com/ethereum/go-ethereum/event"
 	"io"
 	"sync/atomic"
 	"time"
@@ -34,9 +36,8 @@ import (
 )
 
 type Service struct {
-	logger      log.Logger
-	metrics     metrics.Metricer
-	monitor     *gameMonitor
+	logger  log.Logger
+	metrics metrics.Metricer
 	coordinator *challenge.Coordinator
 	registry    *challenge.Registry
 
@@ -55,9 +56,9 @@ type Service struct {
 	rollupClient               *sources.RollupClient
 
 	l1Client     *ethclient.Client
-	pollClient   client.RPC
+	l1Source     *sources.L1Client
 	finalHeadSub ethereum.Subscription
-	damgr        *plasma.DA
+	newHeadSub   ethereum.Subscription
 
 	pprofService *oppprof.Service
 	metricsSrv   *httputil.HTTPServer
@@ -91,16 +92,12 @@ func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error 
 	if err := s.initL1Client(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init l1 client: %w", err)
 	}
-	if err := s.initPollClient(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to init poll client: %w", err)
-	}
 	if err := s.initPProf(&cfg.PprofConfig); err != nil {
 		return fmt.Errorf("failed to init profiling: %w", err)
 	}
 	if err := s.initMetricsServer(&cfg.MetricsConfig); err != nil {
 		return fmt.Errorf("failed to init metrics server: %w", err)
 	}
-	s.initDAManager(cfg)
 	if err := s.initDAChallengeContractCreator(cfg); err != nil {
 		return fmt.Errorf("failed to create da challenge contract creator: %w", err)
 	}
@@ -117,7 +114,9 @@ func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error 
 	if err := s.initCommitmentChallenger(cfg); err != nil {
 		return fmt.Errorf("failed to init commitment challenger: %w", err)
 	}
-	s.initCoordinator()
+	if err := s.initCoordinator(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to init coordinator: %w", err)
+	}
 
 	//s.initMonitor(cfg)
 
@@ -142,19 +141,6 @@ func (s *Service) initL1Client(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("failed to dial L1: %w", err)
 	}
 	s.l1Client = l1Client
-	return nil
-}
-
-func (s *Service) initDAManager(cfg *config.Config) {
-	s.damgr = plasma.NewPlasmaDA(s.logger, cfg.CLIConfig, cfg.PlasmaConfig, &plasma.NoopMetrics{}) // TODO: add DA metrics
-}
-
-func (s *Service) initPollClient(ctx context.Context, cfg *config.Config) error {
-	pollClient, err := client.NewRPCWithClient(ctx, s.logger, cfg.L1EthRpc, client.NewBaseRPCClient(s.l1Client.Client()), cfg.PollInterval)
-	if err != nil {
-		return fmt.Errorf("failed to create RPC client: %w", err)
-	}
-	s.pollClient = pollClient
 	return nil
 }
 
@@ -259,25 +245,48 @@ func (s *Service) initCommitmentChallenger(cfg *config.Config) error {
 	return nil
 }
 
-func (s *Service) initCoordinator() {
-	s.coordinator = challenge.NewCoordinator(s.logger, s.metrics, s.challenger, s.resolver, s.claimer, s.withdrawer)
-	return
-}
+func (s *Service) initCoordinator(ctx context.Context, cfg *config.Config) error {
+	pollClient, err := client.NewRPCWithClient(ctx, s.logger, cfg.L1EthRpc, client.NewBaseRPCClient(s.l1Client.Client()), cfg.PollInterval)
+	if err != nil {
+		return fmt.Errorf("failed to create RPC client: %w", err)
+	}
 
-// TODO: implement this later
-/*
-func (s *Service) initMonitor(cfg *config.Config) {
-	s.monitor = newGameMonitor(s.logger, s.l1Clock, s.factoryContract, s.sched, s.preimages, cfg.GameWindow, s.claimer, cfg.GameAllowlist, s.pollClient)
-}
-*/
-
-func (s *Service) initPollBlockChanges(cfg *config.Config) error {
-	l1Source, err := sources.NewL1Client(s.pollClient, s.logger, s.metrics, cfg.L1ClientConfig)
+	l1Source, err := sources.NewL1Client(pollClient, s.logger, s.metrics, cfg.L1ClientConfig)
 	if err != nil {
 		return err
 	}
+
+	damgr := plasma.NewPlasmaDA(s.logger, *cfg.CLIConfig, *cfg.PlasmaConfig, &plasma.NoopMetrics{}) // TODO: add DA metrics
+
+	beaconClient, fallbacks, err := cfg.BlobSourceConfig.Setup(ctx, s.logger)
+	if err != nil {
+		return fmt.Errorf("failed to setup L1 Beacon API client: %w", err)
+	}
+	beaconCfg := sources.L1BeaconClientConfig{
+		FetchAllSidecars: cfg.BlobSourceConfig.ShouldFetchAllSidecars(),
+	}
+	beacon := sources.NewL1BeaconClient(beaconClient, beaconCfg, fallbacks...)
+
+	factory := derive.NewDataSourceFactory(s.logger, cfg.RollupConfig, s.l1Source, beacon, damgr)
+
+	s.coordinator = challenge.NewCoordinator(s.logger, s.metrics, s.challenger, s.resolver, s.claimer, s.withdrawer,
+		damgr, l1Source, factory, cfg.BatchInboxAddress)
+	s.newHeadSub = event.ResubscribeErr(time.Second*10, func(ctx context.Context, err error) (event.Subscription, error) {
+		if err != nil {
+			s.logger.Warn("resubscribing after failed L1 subscription", "err", err)
+		}
+		return eth.WatchHeadChanges(ctx, s.l1Source, s.coordinator.OnNewL1Head)
+	})
+	go func() {
+		err, ok := <-s.newHeadSub.Err()
+		if !ok {
+			return
+		}
+		s.logger.Error("l1 heads subscription error", "err", err)
+	}()
 	s.finalHeadSub = eth.PollBlockChanges(s.logger, l1Source, s.coordinator.OnNewL1Finalized, eth.Finalized,
 		cfg.L1EpochPollInterval, time.Second*10)
+
 	return nil
 }
 
@@ -286,8 +295,21 @@ func (s *Service) Start(ctx context.Context) error {
 	s.coordinator.Start(ctx) // coordinator will have the listen and dispatching loop for all the contract schedulers
 	s.claimer.Start(ctx)
 	s.logger.Info("starting monitoring")
-	s.monitor.StartMonitoring()
 	s.logger.Info("challenger game service start completed")
+	go func() {
+		for {
+			select {
+			case err := <-s.newHeadSub.Err():
+				s.logger.Error("newHeadSub error:", err)
+			case err := <-s.finalHeadSub.Err():
+				s.logger.Error("finalHeadSub error:", err)
+			default:
+				if s.stopped.Load() {
+					return
+				}
+			}
+		}
+	}()
 	return nil
 }
 
@@ -303,9 +325,6 @@ func (s *Service) Stop(ctx context.Context) error {
 		if err := s.coordinator.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close coordinator: %w", err))
 		}
-	}
-	if s.monitor != nil {
-		s.monitor.StopMonitoring()
 	}
 	if s.claimer != nil {
 		if err := s.claimer.Close(); err != nil {
@@ -337,6 +356,12 @@ func (s *Service) Stop(ctx context.Context) error {
 			result = errors.Join(result, fmt.Errorf("failed to close balance metricer: %w", err))
 		}
 	}
+	if s.finalHeadSub != nil {
+		s.finalHeadSub.Unsubscribe()
+	}
+	if s.newHeadSub != nil {
+		s.newHeadSub.Unsubscribe()
+	}
 
 	if s.txMgr != nil {
 		s.txMgr.Close()
@@ -344,9 +369,6 @@ func (s *Service) Stop(ctx context.Context) error {
 
 	if s.rollupClient != nil {
 		s.rollupClient.Close()
-	}
-	if s.pollClient != nil {
-		s.pollClient.Close()
 	}
 	if s.l1Client != nil {
 		s.l1Client.Close()
