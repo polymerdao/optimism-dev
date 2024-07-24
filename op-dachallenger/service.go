@@ -6,6 +6,11 @@ import (
 	"fmt"
 	"io"
 	"sync/atomic"
+	"time"
+
+	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
+	"github.com/ethereum/go-ethereum"
 
 	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 
@@ -14,7 +19,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum-optimism/optimism/op-challenger/sender"
-	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/keccak256/contracts"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/scheduler"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/config"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/metrics"
@@ -30,10 +34,11 @@ import (
 )
 
 type Service struct {
-	logger     log.Logger
-	metrics    metrics.Metricer
-	monitor    *gameMonitor
-	cordinator *scheduler.Coordinator
+	logger      log.Logger
+	metrics     metrics.Metricer
+	monitor     *gameMonitor
+	coordinator *challenge.Coordinator
+	registry    *challenge.Registry
 
 	txMgr    *txmgr.SimpleTxManager
 	txSender *sender.TxSender
@@ -46,12 +51,13 @@ type Service struct {
 	resolver   *scheduler.ResolveScheduler
 	challenger *scheduler.ChallengeScheduler
 
-	daChallengeContract contracts.DAChallengeContract // how to support variable implementations here?
-	rollupClient        *sources.RollupClient
+	daChallengeContractCreator challenge.ContractCreation // how to support variable implementations here?
+	rollupClient               *sources.RollupClient
 
-	l1Client   *ethclient.Client
-	pollClient client.RPC
-	damgr      plasma.DA
+	l1Client     *ethclient.Client
+	pollClient   client.RPC
+	finalHeadSub ethereum.Subscription
+	damgr        *plasma.DA
 
 	pprofService *oppprof.Service
 	metricsSrv   *httputil.HTTPServer
@@ -94,23 +100,26 @@ func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error 
 	if err := s.initMetricsServer(&cfg.MetricsConfig); err != nil {
 		return fmt.Errorf("failed to init metrics server: %w", err)
 	}
-	if err := s.initDAChallengeContract(cfg); err != nil {
-		return fmt.Errorf("failed to create da challenge contract bindings: %w", err)
+	s.initDAManager(cfg)
+	if err := s.initDAChallengeContractCreator(cfg); err != nil {
+		return fmt.Errorf("failed to create da challenge contract creator: %w", err)
 	}
-	if err := s.initBondUnlocker(); err != nil {
+	s.initRegistry(cfg)
+	if err := s.initBondUnlocker(cfg); err != nil {
 		return fmt.Errorf("failed to init bond unlocker: %w", err)
 	}
-	if err := s.initBondWithdrawer(); err != nil {
+	if err := s.initBondWithdrawer(cfg); err != nil {
 		return fmt.Errorf("failed to init bond withdrawer: %w", err)
 	}
-	if err := s.initChallengeResolver(); err != nil {
+	if err := s.initChallengeResolver(cfg); err != nil {
 		return fmt.Errorf("failed to init challenge resolver: %w", err)
 	}
-	if err := s.initCommitmentChallenger(); err != nil {
+	if err := s.initCommitmentChallenger(cfg); err != nil {
 		return fmt.Errorf("failed to init commitment challenger: %w", err)
 	}
+	s.initCoordinator()
 
-	s.initMonitor(cfg)
+	//s.initMonitor(cfg)
 
 	s.metrics.RecordInfo(version.SimpleWithMeta)
 	s.metrics.RecordUp()
@@ -136,8 +145,8 @@ func (s *Service) initL1Client(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func (s *Service) initDAManager(ctx context.Context, cfg *config.Config) error {
-	// TODO: initialize the damgr
+func (s *Service) initDAManager(cfg *config.Config) {
+	s.damgr = plasma.NewPlasmaDA(s.logger, cfg.CLIConfig, cfg.PlasmaConfig, &plasma.NoopMetrics{}) // TODO: add DA metrics
 }
 
 func (s *Service) initPollClient(ctx context.Context, cfg *config.Config) error {
@@ -185,53 +194,96 @@ func (s *Service) initMetricsServer(cfg *opmetrics.CLIConfig) error {
 	return nil
 }
 
-func (s *Service) initDAChallengeContract(cfg *config.Config) error {
-	daChallengeContract, err := contracts.NewDAChallengeContract(context.Background(), s.metrics, cfg.DAChallengeAddress,
+func (s *Service) initDAChallengeContractCreator(cfg *config.Config) error {
+	creator, err := challenge.NewContractCreator(cfg.CommitmentType, cfg.CommitmentKind)
+	if err != nil {
+		return err
+	}
+	s.daChallengeContractCreator = creator
+	return nil
+}
+
+func (s *Service) initRegistry(cfg *config.Config) {
+	s.registry = &challenge.Registry{}
+	s.registry.RegisterBondUnlockContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.UnlockContractCreator)
+	s.registry.RegisterChallengeResolverContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.ResolveContractCreator)
+	s.registry.RegisterBondWithdrawContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.WithdrawContractCreator)
+	s.registry.RegisterCommitmentChallengeContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.ChallengeContractCreator)
+}
+
+func (s *Service) initBondUnlocker(cfg *config.Config) error {
+	contract, err := s.registry.
+		CreateUnlockContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
 		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
 	if err != nil {
 		return err
 	}
-	s.daChallengeContract = daChallengeContract
-	return nil
-}
-
-func (s *Service) initBondUnlocker() error {
-	claimer := scheduler.NewBondUnlocker(s.logger, s.registry.CreateBondContract, s.txSender)
+	claimer := scheduler.NewBondUnlocker(s.logger, contract, s.txSender)
 	s.claimer = scheduler.NewBondUnlockScheduler(s.logger, s.metrics, claimer)
 	return nil
 }
 
-func (s *Service) initBondWithdrawer() error {
-	withdrawer := scheduler.NewBondWithdrawer(s.logger, s.registry.CreateWithdrawContract, s.txSender)
+func (s *Service) initBondWithdrawer(cfg *config.Config) error {
+	contract, err := s.registry.
+		CreateWithdrawContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
+		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+	if err != nil {
+		return err
+	}
+	withdrawer := scheduler.NewBondWithdrawer(s.logger, contract, s.txSender)
 	s.withdrawer = scheduler.NewWithdrawScheduler(s.logger, s.metrics, withdrawer)
 	return nil
 }
 
-func (s *Service) initChallengeResolver() error {
-	resolver := scheduler.NewResolver(s.logger, s.registry.CreateResolverContract, s.txSender)
+func (s *Service) initChallengeResolver(cfg *config.Config) error {
+	contract, err := s.registry.
+		CreateResolveContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
+		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+	if err != nil {
+		return err
+	}
+	resolver := scheduler.NewResolver(s.logger, contract, s.txSender)
 	s.resolver = scheduler.NewResolveScheduler(s.logger, s.metrics, resolver)
 	return nil
 }
 
-func (s *Service) initCommitmentChallenger() error {
-	challenger := scheduler.NewChallenger(s.logger, s.registry.CreateChallengerContract, s.txSender)
-	s.challenger = scheduler.NewResolveScheduler(s.logger, s.metrics, challenger)
+func (s *Service) initCommitmentChallenger(cfg *config.Config) error {
+	contract, err := s.registry.
+		CreateChallengeContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
+		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+	if err != nil {
+		return err
+	}
+	challenger := scheduler.NewChallenger(s.logger, contract, s.txSender)
+	s.challenger = scheduler.NewChallengeScheduler(s.logger, s.metrics, challenger)
 	return nil
 }
 
-func (s *Service) initCordinator(cfg *config.Config) error {
-	disk := newDiskManager(cfg.Datadir)
-	s.sched = scheduler.NewScheduler(s.logger, s.metrics, disk, cfg.MaxConcurrency, s.registry.CreatePlayer, cfg.AllowInvalidPrestate)
-	return nil
+func (s *Service) initCoordinator() {
+	s.coordinator = challenge.NewCoordinator(s.logger, s.metrics, s.challenger, s.resolver, s.claimer, s.withdrawer)
+	return
 }
 
+// TODO: implement this later
+/*
 func (s *Service) initMonitor(cfg *config.Config) {
 	s.monitor = newGameMonitor(s.logger, s.l1Clock, s.factoryContract, s.sched, s.preimages, cfg.GameWindow, s.claimer, cfg.GameAllowlist, s.pollClient)
+}
+*/
+
+func (s *Service) initPollBlockChanges(cfg *config.Config) error {
+	l1Source, err := sources.NewL1Client(s.pollClient, s.logger, s.metrics, cfg.L1ClientConfig)
+	if err != nil {
+		return err
+	}
+	s.finalHeadSub = eth.PollBlockChanges(s.logger, l1Source, s.coordinator.OnNewL1Finalized, eth.Finalized,
+		cfg.L1EpochPollInterval, time.Second*10)
+	return nil
 }
 
 func (s *Service) Start(ctx context.Context) error {
 	s.logger.Info("starting scheduler")
-	s.cordinator.Start(ctx)
+	s.coordinator.Start(ctx) // coordinator will have the listen and dispatching loop for all the contract schedulers
 	s.claimer.Start(ctx)
 	s.logger.Info("starting monitoring")
 	s.monitor.StartMonitoring()
@@ -247,7 +299,7 @@ func (s *Service) Stop(ctx context.Context) error {
 	s.logger.Info("stopping challenger game service")
 
 	var result error
-	if s.cordinator != nil {
+	if s.coordinator != nil {
 		if err := s.coordinator.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close coordinator: %w", err))
 		}
