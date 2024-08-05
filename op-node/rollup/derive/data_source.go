@@ -49,9 +49,9 @@ type DataSourceFactory struct {
 
 func NewDataSourceFactory(log log.Logger, cfg *rollup.Config, fetcher L1Fetcher, blobsFetcher L1BlobsFetcher, plasmaFetcher PlasmaInputFetcher) *DataSourceFactory {
 	config := DataSourceConfig{
-		l1Signer:          cfg.L1Signer(),
-		batchInboxAddress: cfg.BatchInboxAddress,
-		plasmaEnabled:     cfg.PlasmaEnabled(),
+		L1Signer:          cfg.L1Signer(),
+		BatchInboxAddress: cfg.BatchInboxAddress,
+		PlasmaEnabled:     cfg.PlasmaEnabled(),
 	}
 	return &DataSourceFactory{
 		log:           log,
@@ -76,7 +76,7 @@ func (ds *DataSourceFactory) OpenData(ctx context.Context, ref eth.L1BlockRef, b
 	} else {
 		src = NewCalldataSource(ctx, ds.log, ds.dsCfg, ds.fetcher, ref, batcherAddr)
 	}
-	if ds.dsCfg.plasmaEnabled {
+	if ds.dsCfg.PlasmaEnabled {
 		// plasma([calldata | blobdata](l1Ref)) -> data
 		return NewPlasmaDataSource(ds.log, src, ds.fetcher, ds.plasmaFetcher, ref), nil
 	}
@@ -85,9 +85,9 @@ func (ds *DataSourceFactory) OpenData(ctx context.Context, ref eth.L1BlockRef, b
 
 // DataSourceConfig regroups the mandatory rollup.Config fields needed for DataFromEVMTransactions.
 type DataSourceConfig struct {
-	l1Signer          types.Signer
-	batchInboxAddress common.Address
-	plasmaEnabled     bool
+	L1Signer          types.Signer
+	BatchInboxAddress common.Address
+	PlasmaEnabled     bool
 }
 
 // isValidBatchTx returns true if:

@@ -20,6 +20,10 @@ import (
 // so derivation should halt temporarily.
 var ErrPendingChallenge = errors.New("not found, pending challenge")
 
+// ErrActiveChallenge is returned when data is not available but has an active challenge against it
+// so derivation should halt temporarily
+var ErrActiveChallenge = errors.New("not found, active challenge")
+
 // ErrExpiredChallenge is returned when a challenge was not resolved and derivation should skip this input.
 var ErrExpiredChallenge = errors.New("challenge expired")
 
@@ -238,7 +242,7 @@ func (d *DA) GetInput(ctx context.Context, l1 L1Fetcher, comm CommitmentData, bl
 			if err := d.LookAhead(ctx, l1); err != nil {
 				return nil, err
 			}
-			return nil, ErrPendingChallenge
+			return nil, ErrActiveChallenge
 		case ChallengeResolved:
 			// Generic Commitments don't resolve from L1 so if we still can't find the data we're out of luck
 			if comm.CommitmentType() == GenericCommitmentType {
@@ -257,6 +261,10 @@ func (d *DA) GetInput(ctx context.Context, l1 L1Fetcher, comm CommitmentData, bl
 	}
 
 	return data, nil
+}
+
+func (d *DA) GetChallengeStatus(comm CommitmentData, commBlockNumber uint64) ChallengeStatus {
+	return d.state.GetChallengeStatus(comm, commBlockNumber)
 }
 
 // AdvanceChallengeOrigin reads & stores challenge events for the given L1 block
