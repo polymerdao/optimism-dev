@@ -4,61 +4,48 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
-	"github.com/ethereum/go-ethereum/event"
 	"io"
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge"
-	"github.com/ethereum-optimism/optimism/op-service/eth"
-	"github.com/ethereum/go-ethereum"
-
-	plasma "github.com/ethereum-optimism/optimism/op-plasma"
-
-	"github.com/ethereum-optimism/optimism/op-service/sources"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum-optimism/optimism/op-service/cliapp"
 
 	"github.com/ethereum-optimism/optimism/op-challenger/sender"
+	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/scheduler"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/config"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/version"
+	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 	"github.com/ethereum-optimism/optimism/op-service/client"
-	"github.com/ethereum-optimism/optimism/op-service/clock"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum-optimism/optimism/op-service/httputil"
 	opmetrics "github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum-optimism/optimism/op-service/oppprof"
+	"github.com/ethereum-optimism/optimism/op-service/sources"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/txmgr"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/log"
 )
 
+var _ cliapp.Lifecycle = &Service{}
+
+// Service top-level service for op-dachallenger
 type Service struct {
 	logger  log.Logger
 	metrics metrics.Metricer
-	coordinator *challenge.Coordinator
-	registry    *challenge.Registry
+
+	registry *challenge.Registry
+	actor    *challenge.Actor
 
 	txMgr    *txmgr.SimpleTxManager
 	txSender *sender.TxSender
 
-	systemClock clock.Clock
-	l1Clock     *clock.SimpleClock
-
-	claimer    *scheduler.BondUnlockScheduler
-	withdrawer *scheduler.WithdrawScheduler
-	resolver   *scheduler.ResolveScheduler
-	challenger *scheduler.ChallengeScheduler
-
-	daChallengeContractCreator challenge.ContractCreation // how to support variable implementations here?
-	rollupClient               *sources.RollupClient
-
-	l1Client     *ethclient.Client
-	l1Source     *sources.L1Client
-	finalHeadSub ethereum.Subscription
-	newHeadSub   ethereum.Subscription
+	l1Client            *ethclient.Client
+	l1Source            *sources.L1Client
+	l1EpochPollInterval time.Duration
 
 	pprofService *oppprof.Service
 	metricsSrv   *httputil.HTTPServer
@@ -71,10 +58,9 @@ type Service struct {
 // NewService creates a new Service.
 func NewService(ctx context.Context, logger log.Logger, cfg *config.Config, m metrics.Metricer) (*Service, error) {
 	s := &Service{
-		systemClock: clock.SystemClock,
-		l1Clock:     clock.NewSimpleClock(),
-		logger:      logger,
-		metrics:     m,
+		logger:              logger,
+		metrics:             m,
+		l1EpochPollInterval: cfg.L1EpochPollInterval,
 	}
 
 	if err := s.initFromConfig(ctx, cfg); err != nil {
@@ -86,42 +72,44 @@ func NewService(ctx context.Context, logger log.Logger, cfg *config.Config, m me
 }
 
 func (s *Service) initFromConfig(ctx context.Context, cfg *config.Config) error {
+	if err := s.initPProf(&cfg.PprofConfig); err != nil {
+		return fmt.Errorf("failed to init profiling: %w", err)
+	}
 	if err := s.initTxManager(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init tx manager: %w", err)
 	}
 	if err := s.initL1Client(ctx, cfg); err != nil {
 		return fmt.Errorf("failed to init l1 client: %w", err)
 	}
-	if err := s.initPProf(&cfg.PprofConfig); err != nil {
-		return fmt.Errorf("failed to init profiling: %w", err)
-	}
 	if err := s.initMetricsServer(&cfg.MetricsConfig); err != nil {
 		return fmt.Errorf("failed to init metrics server: %w", err)
 	}
-	if err := s.initDAChallengeContractCreator(cfg); err != nil {
-		return fmt.Errorf("failed to create da challenge contract creator: %w", err)
+	if err := s.initRegistry(cfg); err != nil {
+		return fmt.Errorf("failed to create da contract registry: %w", err)
 	}
-	s.initRegistry(cfg)
-	if err := s.initBondUnlocker(cfg); err != nil {
-		return fmt.Errorf("failed to init bond unlocker: %w", err)
+	if err := s.initActor(ctx, cfg); err != nil {
+		return fmt.Errorf("failed to init actor: %w", err)
 	}
-	if err := s.initBondWithdrawer(cfg); err != nil {
-		return fmt.Errorf("failed to init bond withdrawer: %w", err)
-	}
-	if err := s.initChallengeResolver(cfg); err != nil {
-		return fmt.Errorf("failed to init challenge resolver: %w", err)
-	}
-	if err := s.initCommitmentChallenger(cfg); err != nil {
-		return fmt.Errorf("failed to init commitment challenger: %w", err)
-	}
-	if err := s.initCoordinator(ctx, cfg); err != nil {
-		return fmt.Errorf("failed to init coordinator: %w", err)
-	}
-
-	//s.initMonitor(cfg)
 
 	s.metrics.RecordInfo(version.SimpleWithMeta)
 	s.metrics.RecordUp()
+	return nil
+}
+
+func (s *Service) initPProf(cfg *oppprof.CLIConfig) error {
+	s.pprofService = oppprof.New(
+		cfg.ListenEnabled,
+		cfg.ListenAddr,
+		cfg.ListenPort,
+		cfg.ProfileType,
+		cfg.ProfileDir,
+		cfg.ProfileFilename,
+	)
+
+	if err := s.pprofService.Start(); err != nil {
+		return fmt.Errorf("failed to start pprof service: %w", err)
+	}
+
 	return nil
 }
 
@@ -144,23 +132,6 @@ func (s *Service) initL1Client(ctx context.Context, cfg *config.Config) error {
 	return nil
 }
 
-func (s *Service) initPProf(cfg *oppprof.CLIConfig) error {
-	s.pprofService = oppprof.New(
-		cfg.ListenEnabled,
-		cfg.ListenAddr,
-		cfg.ListenPort,
-		cfg.ProfileType,
-		cfg.ProfileDir,
-		cfg.ProfileFilename,
-	)
-
-	if err := s.pprofService.Start(); err != nil {
-		return fmt.Errorf("failed to start pprof service: %w", err)
-	}
-
-	return nil
-}
-
 func (s *Service) initMetricsServer(cfg *opmetrics.CLIConfig) error {
 	if !cfg.Enabled {
 		return nil
@@ -180,72 +151,20 @@ func (s *Service) initMetricsServer(cfg *opmetrics.CLIConfig) error {
 	return nil
 }
 
-func (s *Service) initDAChallengeContractCreator(cfg *config.Config) error {
+func (s *Service) initRegistry(cfg *config.Config) error {
 	creator, err := challenge.NewContractCreator(cfg.CommitmentType, cfg.CommitmentKind)
 	if err != nil {
 		return err
 	}
-	s.daChallengeContractCreator = creator
-	return nil
-}
-
-func (s *Service) initRegistry(cfg *config.Config) {
 	s.registry = &challenge.Registry{}
-	s.registry.RegisterBondUnlockContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.UnlockContractCreator)
-	s.registry.RegisterChallengeResolverContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.ResolveContractCreator)
-	s.registry.RegisterBondWithdrawContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.WithdrawContractCreator)
-	s.registry.RegisterCommitmentChallengeContract(cfg.CommitmentType, cfg.CommitmentKind, s.daChallengeContractCreator.ChallengeContractCreator)
-}
-
-func (s *Service) initBondUnlocker(cfg *config.Config) error {
-	contract, err := s.registry.
-		CreateUnlockContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
-	if err != nil {
-		return err
-	}
-	claimer := scheduler.NewBondUnlocker(s.logger, contract, s.txSender)
-	s.claimer = scheduler.NewBondUnlockScheduler(s.logger, s.metrics, claimer)
+	s.registry.RegisterBondUnlockContract(cfg.CommitmentType, cfg.CommitmentKind, creator.UnlockContractCreator)
+	s.registry.RegisterChallengeResolverContract(cfg.CommitmentType, cfg.CommitmentKind, creator.ResolveContractCreator)
+	s.registry.RegisterBondWithdrawContract(cfg.CommitmentType, cfg.CommitmentKind, creator.WithdrawContractCreator)
+	s.registry.RegisterCommitmentChallengeContract(cfg.CommitmentType, cfg.CommitmentKind, creator.ChallengeContractCreator)
 	return nil
 }
 
-func (s *Service) initBondWithdrawer(cfg *config.Config) error {
-	contract, err := s.registry.
-		CreateWithdrawContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
-	if err != nil {
-		return err
-	}
-	withdrawer := scheduler.NewBondWithdrawer(s.logger, contract, s.txSender)
-	s.withdrawer = scheduler.NewWithdrawScheduler(s.logger, s.metrics, withdrawer)
-	return nil
-}
-
-func (s *Service) initChallengeResolver(cfg *config.Config) error {
-	contract, err := s.registry.
-		CreateResolveContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
-	if err != nil {
-		return err
-	}
-	resolver := scheduler.NewResolver(s.logger, contract, s.txSender)
-	s.resolver = scheduler.NewResolveScheduler(s.logger, s.metrics, resolver)
-	return nil
-}
-
-func (s *Service) initCommitmentChallenger(cfg *config.Config) error {
-	contract, err := s.registry.
-		CreateChallengeContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-		batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
-	if err != nil {
-		return err
-	}
-	challenger := scheduler.NewChallenger(s.logger, contract, s.txSender)
-	s.challenger = scheduler.NewChallengeScheduler(s.logger, s.metrics, challenger)
-	return nil
-}
-
-func (s *Service) initCoordinator(ctx context.Context, cfg *config.Config) error {
+func (s *Service) initActor(ctx context.Context, cfg *config.Config) error {
 	pollClient, err := client.NewRPCWithClient(ctx, s.logger, cfg.L1EthRpc, client.NewBaseRPCClient(s.l1Client.Client()), cfg.PollInterval)
 	if err != nil {
 		return fmt.Errorf("failed to create RPC client: %w", err)
@@ -267,41 +186,49 @@ func (s *Service) initCoordinator(ctx context.Context, cfg *config.Config) error
 	}
 	beacon := sources.NewL1BeaconClient(beaconClient, beaconCfg, fallbacks...)
 
-	factory := derive.NewDataSourceFactory(s.logger, cfg.RollupConfig, s.l1Source, beacon, damgr)
-
-	s.coordinator = challenge.NewCoordinator(s.logger, s.metrics, s.challenger, s.resolver, s.claimer, s.withdrawer,
-		damgr, l1Source, factory, cfg.BatchInboxAddress)
-	s.newHeadSub = event.ResubscribeErr(time.Second*10, func(ctx context.Context, err error) (event.Subscription, error) {
+	var defender *scheduler.ResolveScheduler
+	var challenger *scheduler.ChallengeScheduler
+	if cfg.Defend {
+		contract, err := s.registry.
+			CreateResolveContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
+			batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
 		if err != nil {
-			s.logger.Warn("resubscribing after failed L1 subscription", "err", err)
+			return err
 		}
-		return eth.WatchHeadChanges(ctx, s.l1Source, s.coordinator.OnNewL1Head)
-	})
-	go func() {
-		err, ok := <-s.newHeadSub.Err()
-		if !ok {
-			return
+		res := scheduler.NewResolver(s.logger, contract, s.txSender)
+		defender = scheduler.NewResolveScheduler(s.logger, s.metrics, res)
+	}
+	if cfg.Challenge {
+		contract, err := s.registry.
+			CreateChallengeContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
+			batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+		if err != nil {
+			return err
 		}
-		s.logger.Error("l1 heads subscription error", "err", err)
-	}()
-	s.finalHeadSub = eth.PollBlockChanges(s.logger, l1Source, s.coordinator.OnNewL1Finalized, eth.Finalized,
-		cfg.L1EpochPollInterval, time.Second*10)
+		chal := scheduler.NewChallenger(s.logger, contract, s.txSender)
+		challenger = scheduler.NewChallengeScheduler(s.logger, s.metrics, chal)
+	}
 
+	actor, err := challenge.NewActor(s.logger, s.metrics, defender, challenger,
+		damgr, l1Source, beacon, cfg.RollupConfig)
+	if err != nil {
+		return err
+	}
+	s.actor = actor
+	s.l1Source = l1Source
 	return nil
 }
 
+// Start satisfies cliapp.Lifecycle
 func (s *Service) Start(ctx context.Context) error {
-	s.logger.Info("starting scheduler")
-	s.coordinator.Start(ctx) // coordinator will have the listen and dispatching loop for all the contract schedulers
-	s.claimer.Start(ctx)
-	s.logger.Info("starting monitoring")
-	s.logger.Info("challenger game service start completed")
+	s.logger.Info("starting da challenge service")
+	s.actor.Start(ctx)
+	finalHeadSub := eth.PollBlockChanges(s.logger, s.l1Source, s.actor.OnNewL1Finalized, eth.Finalized,
+		s.l1EpochPollInterval, time.Second*10)
 	go func() {
 		for {
 			select {
-			case err := <-s.newHeadSub.Err():
-				s.logger.Error("newHeadSub error:", err)
-			case err := <-s.finalHeadSub.Err():
+			case err := <-finalHeadSub.Err():
 				s.logger.Error("finalHeadSub error:", err)
 			default:
 				if s.stopped.Load() {
@@ -310,40 +237,23 @@ func (s *Service) Start(ctx context.Context) error {
 			}
 		}
 	}()
+	s.logger.Info("challenger game service start completed")
 	return nil
 }
 
+// Stopped satisfies cliapp.Lifecycle
 func (s *Service) Stopped() bool {
 	return s.stopped.Load()
 }
 
+// Stop satisfied cliapp.Lifecycle
 func (s *Service) Stop(ctx context.Context) error {
-	s.logger.Info("stopping challenger game service")
+	s.logger.Info("stopping da challenger service")
 
 	var result error
-	if s.coordinator != nil {
-		if err := s.coordinator.Close(); err != nil {
+	if s.actor != nil {
+		if err := s.actor.Close(); err != nil {
 			result = errors.Join(result, fmt.Errorf("failed to close coordinator: %w", err))
-		}
-	}
-	if s.claimer != nil {
-		if err := s.claimer.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("failed to close claimer: %w", err))
-		}
-	}
-	if s.withdrawer != nil {
-		if err := s.withdrawer.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("failed to close withdrawer: %w", err))
-		}
-	}
-	if s.resolver != nil {
-		if err := s.resolver.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("failed to close resolver: %w", err))
-		}
-	}
-	if s.challenger != nil {
-		if err := s.challenger.Close(); err != nil {
-			result = errors.Join(result, fmt.Errorf("failed to close challenger: %w", err))
 		}
 	}
 	if s.pprofService != nil {
@@ -356,19 +266,8 @@ func (s *Service) Stop(ctx context.Context) error {
 			result = errors.Join(result, fmt.Errorf("failed to close balance metricer: %w", err))
 		}
 	}
-	if s.finalHeadSub != nil {
-		s.finalHeadSub.Unsubscribe()
-	}
-	if s.newHeadSub != nil {
-		s.newHeadSub.Unsubscribe()
-	}
-
 	if s.txMgr != nil {
 		s.txMgr.Close()
-	}
-
-	if s.rollupClient != nil {
-		s.rollupClient.Close()
 	}
 	if s.l1Client != nil {
 		s.l1Client.Close()
@@ -379,6 +278,7 @@ func (s *Service) Stop(ctx context.Context) error {
 		}
 	}
 	s.stopped.Store(true)
+
 	s.logger.Info("stopped challenger game service", "err", result)
 	return result
 }

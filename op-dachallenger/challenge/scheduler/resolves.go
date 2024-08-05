@@ -9,7 +9,7 @@ import (
 )
 
 type Resolving interface {
-	ResolveChallenges(ctx context.Context, resolveData []types.ResolveData) error
+	ResolveChallenge(ctx context.Context, resolveData types.ResolveData) error
 }
 
 type ResolveScheduler struct {
@@ -22,13 +22,13 @@ type ResolveScheduler struct {
 }
 
 type ResolveSchedulerMetrics interface {
-	RecordDAChallenge()
-	RecordDAChallengeFailed() // TODO: HERE
+	RecordDAResolveFailed()
+	RecordDAResolve()
 }
 
 type resolveMessage struct {
 	blockNumber uint64
-	resolveData []types.ResolveData
+	resolveData types.ResolveData
 }
 
 func NewResolveScheduler(logger log.Logger, metrics ResolveSchedulerMetrics, resolver Resolving) *ResolveScheduler {
@@ -60,17 +60,17 @@ func (s *ResolveScheduler) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-s.ch:
-			if err := s.resolver.ResolveChallenges(ctx, msg.resolveData); err != nil {
-				s.metrics.RecordDAChallengeFailed()
+			if err := s.resolver.ResolveChallenge(ctx, msg.resolveData); err != nil {
+				s.metrics.RecordDAResolveFailed()
 				s.log.Error("Failed to resolve challenges", "blockNumber", msg.blockNumber, "err", err)
 			} else {
-				s.metrics.RecordDAChallenge()
+				s.metrics.RecordDAResolve()
 			}
 		}
 	}
 }
 
-func (s *ResolveScheduler) Schedule(blockNumber uint64, resolveData []types.ResolveData) error {
+func (s *ResolveScheduler) Schedule(blockNumber uint64, resolveData types.ResolveData) error {
 	select {
 	case s.ch <- resolveMessage{blockNumber, resolveData}:
 	}

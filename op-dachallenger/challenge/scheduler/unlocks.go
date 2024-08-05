@@ -9,7 +9,7 @@ import (
 )
 
 type BondUnlocker interface {
-	UnlockBonds(ctx context.Context, challenges []types.CommitmentArg) error
+	UnlockBond(ctx context.Context, challenge types.CommitmentArg) error
 }
 
 type BondUnlockScheduler struct {
@@ -23,11 +23,12 @@ type BondUnlockScheduler struct {
 
 type BondUnlockSchedulerMetrics interface {
 	RecordBondUnlockFailed()
+	RecordBondUnlock()
 }
 
 type unlockMessage struct {
 	blockNumber uint64
-	challenges  []types.CommitmentArg
+	challenge   types.CommitmentArg
 }
 
 func NewBondUnlockScheduler(logger log.Logger, metrics BondUnlockSchedulerMetrics, unlocker BondUnlocker) *BondUnlockScheduler {
@@ -59,7 +60,7 @@ func (s *BondUnlockScheduler) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-s.ch:
-			if err := s.unlocker.UnlockBonds(ctx, msg.challenges); err != nil {
+			if err := s.unlocker.UnlockBond(ctx, msg.challenge); err != nil {
 				s.metrics.RecordBondUnlockFailed()
 				s.log.Error("Failed to claim bonds", "blockNumber", msg.blockNumber, "err", err)
 			}
@@ -67,9 +68,9 @@ func (s *BondUnlockScheduler) run(ctx context.Context) {
 	}
 }
 
-func (s *BondUnlockScheduler) Schedule(blockNumber uint64, challenges []types.CommitmentArg) error {
+func (s *BondUnlockScheduler) Schedule(blockNumber uint64, challenge types.CommitmentArg) error {
 	select {
-	case s.ch <- unlockMessage{blockNumber, challenges}:
+	case s.ch <- unlockMessage{blockNumber, challenge}:
 	default:
 		s.log.Trace("Skipping game bond claim while claiming in progress")
 	}

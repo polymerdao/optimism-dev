@@ -9,7 +9,7 @@ import (
 )
 
 type Challenging interface {
-	ChallengeCommitments(ctx context.Context, commitments []types.CommitmentArg) error
+	ChallengeCommitment(ctx context.Context, commitment types.CommitmentArg) error
 }
 
 type ChallengeScheduler struct {
@@ -22,13 +22,13 @@ type ChallengeScheduler struct {
 }
 
 type ChallengerSchedulerMetrics interface {
+	RecordDAChallengeFailed()
 	RecordDAChallenge()
-	RecordDAChallengeFailed() // TODO: HERE
 }
 
 type challengeMessage struct {
 	blockNumber uint64
-	commitments []types.CommitmentArg
+	commitment  types.CommitmentArg
 }
 
 func NewChallengeScheduler(logger log.Logger, metrics ChallengerSchedulerMetrics, challenger Challenging) *ChallengeScheduler {
@@ -60,7 +60,7 @@ func (s *ChallengeScheduler) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case msg := <-s.ch:
-			if err := s.challenger.ChallengeCommitments(ctx, msg.commitments); err != nil {
+			if err := s.challenger.ChallengeCommitment(ctx, msg.commitment); err != nil {
 				s.metrics.RecordDAChallengeFailed()
 				s.log.Error("Failed to challenge commitments", "blockNumber", msg.blockNumber, "err", err)
 			} else {
@@ -70,9 +70,9 @@ func (s *ChallengeScheduler) run(ctx context.Context) {
 	}
 }
 
-func (s *ChallengeScheduler) Schedule(blockNumber uint64, commitments []types.CommitmentArg) error {
+func (s *ChallengeScheduler) Schedule(blockNumber uint64, commitment types.CommitmentArg) error {
 	select {
-	case s.ch <- challengeMessage{blockNumber, commitments}:
+	case s.ch <- challengeMessage{blockNumber, commitment}:
 	}
 	return nil
 }

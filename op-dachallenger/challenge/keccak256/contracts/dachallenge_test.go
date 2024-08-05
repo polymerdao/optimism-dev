@@ -9,6 +9,7 @@ import (
 
 	contractMetrics "github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
+	plasma "github.com/ethereum-optimism/optimism/op-plasma"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching/rpcblock"
 	batchingTest "github.com/ethereum-optimism/optimism/op-service/sources/batching/test"
@@ -53,7 +54,7 @@ var (
 	_, _                     = rnd.Read(blob)
 	challengeHeight          = big.NewInt(19999999)
 	commitment               = crypto.Keccak256(blob)
-	prefixedCommitment       = append([]byte{uint8(types.Keccak256)}, commitment...)
+	prefixedCommitment       = append([]byte{uint8(plasma.Keccak256CommitmentType)}, commitment...)
 	comm                     = types.CommitmentArg{
 		ChallengedBlockNumber: challengeHeight,
 		ChallengedCommitment:  prefixedCommitment,

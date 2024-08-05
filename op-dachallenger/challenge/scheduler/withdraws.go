@@ -22,6 +22,7 @@ type WithdrawScheduler struct {
 
 type WithdrawSchedulerMetrics interface {
 	RecordWithdrawFailed()
+	RecordWithdraw()
 }
 
 type withdrawMessage struct {

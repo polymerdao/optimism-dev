@@ -2,32 +2,27 @@ package scheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	"github.com/ethereum-optimism/optimism/op-dachallenger/challenge/types"
 	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
-	"github.com/ethereum-optimism/optimism/op-service/txmgr"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type ChallengeContract interface {
-	Challenge(ctx context.Context, challenge types.CommitmentArg) (txmgr.TxCandidate, error)
-}
-
 type ChallengeContractCreator func(ctx context.Context, m metrics.ContractMetricer,
-	addr common.Address, caller *batching.MultiCaller) (ChallengeContract, error)
+	addr common.Address, caller *batching.MultiCaller) (types.ChallengeContract, error)
 
 type Challenger struct {
 	logger   log.Logger
-	contract ChallengeContract
+	contract types.ChallengeContract
 	txSender types.TxSender
 }
 
 var _ Challenging = (*Challenger)(nil)
 
-func NewChallenger(l log.Logger, contract ChallengeContract, txSender types.TxSender) *Challenger {
+func NewChallenger(l log.Logger, contract types.ChallengeContract, txSender types.TxSender) *Challenger {
 	return &Challenger{
 		logger:   l,
 		contract: contract,
@@ -35,14 +30,7 @@ func NewChallenger(l log.Logger, contract ChallengeContract, txSender types.TxSe
 	}
 }
 
-func (c *Challenger) ChallengeCommitments(ctx context.Context, commitments []types.CommitmentArg) (err error) {
-	for _, comm := range commitments {
-		err = errors.Join(err, c.challengeCommitment(ctx, comm))
-	}
-	return err
-}
-
-func (c *Challenger) challengeCommitment(ctx context.Context, commitment types.CommitmentArg) error {
+func (c *Challenger) ChallengeCommitment(ctx context.Context, commitment types.CommitmentArg) (err error) {
 	c.logger.Debug("Attempting to challenge commitment for", "blockheight", commitment.ChallengedBlockNumber,
 		"commitment", commitment.ChallengedCommitment)
 
