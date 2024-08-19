@@ -15,7 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const Namespace = "op_challenger"
+const Namespace = "op_dachallenger"
 
 type Metricer interface {
 	RecordUp()

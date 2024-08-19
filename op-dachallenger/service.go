@@ -60,7 +60,7 @@ func NewService(ctx context.Context, logger log.Logger, cfg *config.Config, m me
 	s := &Service{
 		logger:              logger,
 		metrics:             m,
-		l1EpochPollInterval: cfg.L1EpochPollInterval,
+		l1EpochPollInterval: cfg.PollInterval,
 	}
 
 	if err := s.initFromConfig(ctx, cfg); err != nil {
@@ -152,15 +152,19 @@ func (s *Service) initMetricsServer(cfg *opmetrics.CLIConfig) error {
 }
 
 func (s *Service) initRegistry(cfg *config.Config) error {
-	creator, err := challenge.NewContractCreator(cfg.CommitmentType, cfg.CommitmentKind)
+	creator, err := challenge.NewContractCreator(cfg.PlasmaConfig.CommitmentType, cfg.CommitmentKind)
 	if err != nil {
 		return err
 	}
 	s.registry = &challenge.Registry{}
-	s.registry.RegisterBondUnlockContract(cfg.CommitmentType, cfg.CommitmentKind, creator.UnlockContractCreator)
-	s.registry.RegisterChallengeResolverContract(cfg.CommitmentType, cfg.CommitmentKind, creator.ResolveContractCreator)
-	s.registry.RegisterBondWithdrawContract(cfg.CommitmentType, cfg.CommitmentKind, creator.WithdrawContractCreator)
-	s.registry.RegisterCommitmentChallengeContract(cfg.CommitmentType, cfg.CommitmentKind, creator.ChallengeContractCreator)
+	s.registry.RegisterBondUnlockContract(cfg.PlasmaConfig.CommitmentType, cfg.CommitmentKind,
+		creator.UnlockContractCreator)
+	s.registry.RegisterChallengeResolverContract(cfg.PlasmaConfig.CommitmentType, cfg.CommitmentKind,
+		creator.ResolveContractCreator)
+	s.registry.RegisterBondWithdrawContract(cfg.PlasmaConfig.CommitmentType, cfg.CommitmentKind,
+		creator.WithdrawContractCreator)
+	s.registry.RegisterCommitmentChallengeContract(cfg.PlasmaConfig.CommitmentType, cfg.CommitmentKind,
+		creator.ChallengeContractCreator)
 	return nil
 }
 
@@ -190,8 +194,9 @@ func (s *Service) initActor(ctx context.Context, cfg *config.Config) error {
 	var challenger *scheduler.ChallengeScheduler
 	if cfg.Defend {
 		contract, err := s.registry.
-			CreateResolveContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-			batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+			CreateResolveContract[cfg.PlasmaConfig.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics,
+			cfg.PlasmaConfig.DAChallengeContractAddress, batching.NewMultiCaller(s.l1Client.Client(),
+				batching.DefaultBatchSize))
 		if err != nil {
 			return err
 		}
@@ -200,8 +205,9 @@ func (s *Service) initActor(ctx context.Context, cfg *config.Config) error {
 	}
 	if cfg.Challenge {
 		contract, err := s.registry.
-			CreateChallengeContract[cfg.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics, cfg.DAChallengeAddress,
-			batching.NewMultiCaller(s.l1Client.Client(), batching.DefaultBatchSize))
+			CreateChallengeContract[cfg.PlasmaConfig.CommitmentType][cfg.CommitmentKind](context.Background(), s.metrics,
+			cfg.PlasmaConfig.DAChallengeContractAddress, batching.NewMultiCaller(s.l1Client.Client(),
+				batching.DefaultBatchSize))
 		if err != nil {
 			return err
 		}
