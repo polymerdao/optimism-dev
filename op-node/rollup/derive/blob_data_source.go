@@ -121,7 +121,7 @@ func dataAndHashesFromTxs(txs types.Transactions, config *DataSourceConfig, batc
 	blobIndex := 0 // index of each blob in the block's blob sidecar
 	for _, tx := range txs {
 		// skip any non-batcher transactions
-		if !isValidBatchTx(tx, config.l1Signer, config.batchInboxAddress, batcherAddr) {
+		if !isValidBatchTx(tx, config.L1Signer, config.BatchInboxAddress, batcherAddr) {
 			blobIndex += len(tx.BlobHashes())
 			continue
 		}

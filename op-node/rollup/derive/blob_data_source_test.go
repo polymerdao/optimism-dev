@@ -27,8 +27,8 @@ func TestDataAndHashesFromTxs(t *testing.T) {
 	chainId := new(big.Int).SetUint64(rng.Uint64())
 	signer := types.NewCancunSigner(chainId)
 	config := DataSourceConfig{
-		l1Signer:          signer,
-		batchInboxAddress: batchInboxAddr,
+		L1Signer:          signer,
+		BatchInboxAddress: batchInboxAddr,
 	}
 
 	// create a valid non-blob batcher transaction and make sure it's picked up
