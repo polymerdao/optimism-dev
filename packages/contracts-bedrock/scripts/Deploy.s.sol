@@ -291,6 +291,35 @@ contract Deploy is Deployer {
         console.log("set up op chain!");
     }
 
+    // Deploy specific contracts for polymer
+    function _deployPolymerL1Contracts() internal {
+        console.log("Deploying a fresh OP Stack for only contracts which depend on polymer");
+        deploySafe("SystemOwnerSafe");
+        deployAddressManager();
+        deployProxyAdmin();
+        transferProxyAdminOwnership(); // transfers proxy admin ownership to safe
+        deployL2OutputOracle();
+        deployPolymerProxies();
+        initializeL2OutputOracle();
+        transferAddressManagerOwnership();
+    }
+
+     // Only deploy the relevant proxies for polymer
+     function deployPolymerProxies() public {
+        deployERC1967Proxy("L2OutputOracleProxy");
+        deployERC1967Proxy("OptimismPortalProxy");
+    }
+
+    function runPolymerContracts()public{
+        _deployPolymerL1Contracts();
+    }
+
+    function runPolymerContractsWithStateDump() public {
+        vm.chainId(cfg.l1ChainID());
+        _deployPolymerL1Contracts();
+        vm.dumpState(Config.stateDumpPath(""));
+    }
+
     ////////////////////////////////////////////////////////////////
     //           High Level Deployment Functions                  //
     ////////////////////////////////////////////////////////////////
@@ -1179,7 +1208,7 @@ contract Deploy is Deployer {
         console.log("L2OutputOracle version: %s", version);
 
         ChainAssertions.checkL2OutputOracle({
-            _contracts: _proxies(),
+            _contracts: _proxiesUnstrict(),
             _cfg: cfg,
             _l2OutputOracleStartingTimestamp: cfg.l2OutputOracleStartingTimestamp(),
             _isProxy: true

@@ -87,65 +87,18 @@ contract DeployConfig is Script {
             require(false, string.concat("Cannot find deploy config file at ", _path));
         }
 
-        finalSystemOwner = stdJson.readAddress(_json, "$.finalSystemOwner");
-        superchainConfigGuardian = stdJson.readAddress(_json, "$.superchainConfigGuardian");
+
         l1ChainID = stdJson.readUint(_json, "$.l1ChainID");
-        l2ChainID = stdJson.readUint(_json, "$.l2ChainID");
-        l2BlockTime = stdJson.readUint(_json, "$.l2BlockTime");
-        maxSequencerDrift = stdJson.readUint(_json, "$.maxSequencerDrift");
-        sequencerWindowSize = stdJson.readUint(_json, "$.sequencerWindowSize");
-        channelTimeout = stdJson.readUint(_json, "$.channelTimeout");
-        p2pSequencerAddress = stdJson.readAddress(_json, "$.p2pSequencerAddress");
-        batchInboxAddress = stdJson.readAddress(_json, "$.batchInboxAddress");
-        batchSenderAddress = stdJson.readAddress(_json, "$.batchSenderAddress");
         l2OutputOracleSubmissionInterval = stdJson.readUint(_json, "$.l2OutputOracleSubmissionInterval");
         _l2OutputOracleStartingTimestamp = stdJson.readInt(_json, "$.l2OutputOracleStartingTimestamp");
         l2OutputOracleStartingBlockNumber = stdJson.readUint(_json, "$.l2OutputOracleStartingBlockNumber");
+        l2BlockTime = stdJson.readUint(_json, "$.l2BlockTime");
         l2OutputOracleProposer = stdJson.readAddress(_json, "$.l2OutputOracleProposer");
         l2OutputOracleChallenger = stdJson.readAddress(_json, "$.l2OutputOracleChallenger");
         finalizationPeriodSeconds = stdJson.readUint(_json, "$.finalizationPeriodSeconds");
-        fundDevAccounts = _readOr(_json, "$.fundDevAccounts", false);
+
         proxyAdminOwner = stdJson.readAddress(_json, "$.proxyAdminOwner");
-        baseFeeVaultRecipient = stdJson.readAddress(_json, "$.baseFeeVaultRecipient");
-        baseFeeVaultMinimumWithdrawalAmount = stdJson.readUint(_json, "$.baseFeeVaultMinimumWithdrawalAmount");
-        baseFeeVaultWithdrawalNetwork = stdJson.readUint(_json, "$.baseFeeVaultWithdrawalNetwork");
-        l1FeeVaultRecipient = stdJson.readAddress(_json, "$.l1FeeVaultRecipient");
-        l1FeeVaultMinimumWithdrawalAmount = stdJson.readUint(_json, "$.l1FeeVaultMinimumWithdrawalAmount");
-        l1FeeVaultWithdrawalNetwork = stdJson.readUint(_json, "$.l1FeeVaultWithdrawalNetwork");
-        sequencerFeeVaultRecipient = stdJson.readAddress(_json, "$.sequencerFeeVaultRecipient");
-        sequencerFeeVaultMinimumWithdrawalAmount = stdJson.readUint(_json, "$.sequencerFeeVaultMinimumWithdrawalAmount");
-        sequencerFeeVaultWithdrawalNetwork = stdJson.readUint(_json, "$.sequencerFeeVaultWithdrawalNetwork");
-        governanceTokenName = stdJson.readString(_json, "$.governanceTokenName");
-        governanceTokenSymbol = stdJson.readString(_json, "$.governanceTokenSymbol");
-        governanceTokenOwner = stdJson.readAddress(_json, "$.governanceTokenOwner");
-        l2GenesisBlockGasLimit = stdJson.readUint(_json, "$.l2GenesisBlockGasLimit");
-        basefeeScalar = uint32(_readOr(_json, "$.gasPriceOracleBaseFeeScalar", 1368));
-        blobbasefeeScalar = uint32(_readOr(_json, "$.gasPriceOracleBlobBaseFeeScalar", 810949));
-
-        enableGovernance = stdJson.readBool(_json, "$.enableGovernance");
-        eip1559Denominator = stdJson.readUint(_json, "$.eip1559Denominator");
-        eip1559Elasticity = stdJson.readUint(_json, "$.eip1559Elasticity");
-        systemConfigStartBlock = stdJson.readUint(_json, "$.systemConfigStartBlock");
-        requiredProtocolVersion = stdJson.readUint(_json, "$.requiredProtocolVersion");
-        recommendedProtocolVersion = stdJson.readUint(_json, "$.recommendedProtocolVersion");
-
         useFaultProofs = _readOr(_json, "$.useFaultProofs", false);
-        proofMaturityDelaySeconds = _readOr(_json, "$.proofMaturityDelaySeconds", 0);
-        disputeGameFinalityDelaySeconds = _readOr(_json, "$.disputeGameFinalityDelaySeconds", 0);
-        respectedGameType = _readOr(_json, "$.respectedGameType", 0);
-
-        faultGameAbsolutePrestate = stdJson.readUint(_json, "$.faultGameAbsolutePrestate");
-        faultGameMaxDepth = stdJson.readUint(_json, "$.faultGameMaxDepth");
-        faultGameSplitDepth = stdJson.readUint(_json, "$.faultGameSplitDepth");
-        faultGameClockExtension = stdJson.readUint(_json, "$.faultGameClockExtension");
-        faultGameMaxClockDuration = stdJson.readUint(_json, "$.faultGameMaxClockDuration");
-        faultGameGenesisBlock = stdJson.readUint(_json, "$.faultGameGenesisBlock");
-        faultGameGenesisOutputRoot = stdJson.readBytes32(_json, "$.faultGameGenesisOutputRoot");
-        faultGameWithdrawalDelay = stdJson.readUint(_json, "$.faultGameWithdrawalDelay");
-
-        preimageOracleMinProposalSize = stdJson.readUint(_json, "$.preimageOracleMinProposalSize");
-        preimageOracleChallengePeriod = stdJson.readUint(_json, "$.preimageOracleChallengePeriod");
-
         usePlasma = _readOr(_json, "$.usePlasma", false);
         daChallengeWindow = _readOr(_json, "$.daChallengeWindow", 1000);
         daResolveWindow = _readOr(_json, "$.daResolveWindow", 1000);
