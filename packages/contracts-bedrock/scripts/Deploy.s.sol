@@ -292,7 +292,7 @@ contract Deploy is Deployer {
     }
 
        // Deploy specific contracts for polymer
-    function deployPolymerL1Contracts() public {
+    function _deployPolymerL1Contracts() internal {
         console.log("Deploying a fresh OP Stack for only contracts which depend on polymer");
         deploySafe("SystemOwnerSafe");
         deployAddressManager();
@@ -302,6 +302,19 @@ contract Deploy is Deployer {
         deployL2OutputOracleProxy();
         initializeL2OutputOracle();
     }
+
+    function runPolymerContracts()public{
+        _deployPolymerL1Contracts();
+    }
+
+    function runPolymerContractsWithStateDump() public {
+        vm.chainId(cfg.l1ChainID());
+        _deployPolymerL1Contracts();
+        vm.dumpState(Config.stateDumpPath(""));
+    }
+
+
+
 
     ////////////////////////////////////////////////////////////////
     //           High Level Deployment Functions                  //

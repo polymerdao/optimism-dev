@@ -13,7 +13,7 @@ jq --arg new_value $blockNumber '.systemConfigStartBlock= $new_value' $OLD_DEPLO
 
 forge script \
     scripts/Deploy.s.sol:Deploy \
-    --sig deployPolymerL1Contracts \
+    --sig runPolymerContractsWithStateDump \
     --broadcast \
     --private-key $DUMMY_PRIVATE_KEY \
     --rpc-url $LOCAL_RPC
