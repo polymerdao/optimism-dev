@@ -47,7 +47,7 @@ var (
 	WETHAddr                          = common.HexToAddress(WETH)
 	L2CrossDomainMessengerAddr        = common.HexToAddress(L2CrossDomainMessenger)
 	L2StandardBridgeAddr              = common.HexToAddress(L2StandardBridge)
-	SequencerFeeVaultAddr             = common.HexToAddress(SequencerFeeVault)
+	SequencerFeeVaultAddr             = common.HexToAddress("")
 	OptimismMintableERC20FactoryAddr  = common.HexToAddress(OptimismMintableERC20Factory)
 	L1BlockNumberAddr                 = common.HexToAddress(L1BlockNumber)
 	GasPriceOracleAddr                = common.HexToAddress(GasPriceOracle)
