@@ -297,14 +297,20 @@ contract Deploy is Deployer {
         deploySafe("SystemOwnerSafe");
         deployAddressManager();
         deployProxyAdmin();
-        transferProxyAdminOwnership();
+        transferProxyAdminOwnership(); // transfers proxy admin ownership to safe
         deployL2OutputOracle();
-        deployL2OutputOracleProxy();
+        deployPolymerProxies();
         initializeL2OutputOracle();
         transferAddressManagerOwnership();
     }
 
-    function runPolymerContracts() public {
+     // Only deploy the relevant proxies for polymer
+     function deployPolymerProxies() public {
+        deployERC1967Proxy("L2OutputOracleProxy");
+        deployERC1967Proxy("OptimismPortalProxy");
+    }
+
+    function runPolymerContracts()public{
         _deployPolymerL1Contracts();
     }
 
@@ -405,10 +411,6 @@ contract Deploy is Deployer {
         deployPreimageOracle();
         deployMips();
         deployAnchorStateRegistry();
-    }
-
-     function deployL2OutputOracleProxy() public {
-        deployERC1967Proxy("L2OutputOracleProxy");
     }
 
     /// @notice Initialize all of the implementations
