@@ -302,27 +302,53 @@ contract Deploy is Deployer {
         console.log("set up op chain!");
     }
 
-    // Deploy specific contracts for polymer
-    function _deployPolymerL1Contracts() internal {
-        console.log("Deploying a fresh OP Stack for only contracts which depend on polymer");
+    // Deploy only the contracts that are required to generate a rollup config
+    function _deployRollupContracts() internal{
+        console.log("Deploying L1 contracts that are needed to generate peptide rollup config");
         deploySafe("SystemOwnerSafe");
-        deployAddressManager();
+        deployAddressManager(); // Address manager is required for the ProxyAdmin
         deployProxyAdmin();
         transferProxyAdminOwnership(); // transfers proxy admin ownership to safe
-        deployL2OutputOracle();
-        deployPolymerProxies();
-        initializeL2OutputOracle();
-        transferAddressManagerOwnership();
+        deployERC1967Proxy("OptimismPortalProxy");
     }
 
-     // Only deploy the relevant proxies for polymer
-     function deployPolymerProxies() public {
+
+    // Deploy only the L2OO related contracts. Note: requires running _deployRollupContracts first or will revert.
+    function _depolyL2OOContracts() internal{
+        console.log("Deploying and initializing L2OO proxy and implementation");
         deployERC1967Proxy("L2OutputOracleProxy");
-        deployERC1967Proxy("OptimismPortalProxy");
+        deployL2OutputOracle();
+        initializeL2OutputOracle();
+    }
+
+    // Deploy specific contracts for polymer
+    function _deployPolymerL1Contracts() internal {
+        _deployRollupContracts();
+        _depolyL2OOContracts();
+    }
+
+
+    function runPolymerL2OOContracts()public{
+        _depolyL2OOContracts();
+    }
+    function runPolymerRollupOnlyConracts()public{
+        _deployRollupContracts();
     }
 
     function runPolymerContracts()public{
         _deployPolymerL1Contracts();
+    }
+
+    function runPolymerRollupContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _deployRollupContracts();
+        vm.dumpState(Config.stateDumpPath("rollupOnly"));
+    }
+
+    function runPolymerL2OOContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _depolyL2OOContracts();
+        vm.dumpState(Config.stateDumpPath("L2OO"));
     }
 
     function runPolymerContractsWithStateDump() public {
@@ -330,7 +356,6 @@ contract Deploy is Deployer {
         _deployPolymerL1Contracts();
         vm.dumpState(Config.stateDumpPath(""));
     }
-
     ////////////////////////////////////////////////////////////////
     //           High Level Deployment Functions                  //
     ////////////////////////////////////////////////////////////////
