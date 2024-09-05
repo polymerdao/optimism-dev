@@ -303,7 +303,7 @@ contract Deploy is Deployer {
     }
 
     // Deploy only the contracts that are required to generate a rollup config
-    function _deployRollupContracts() internal{
+    function _deployRollupContracts() internal {
         console.log("Deploying L1 contracts that are needed to generate peptide rollup config");
         deploySafe("SystemOwnerSafe");
         deployAddressManager(); // Address manager is required for the ProxyAdmin
@@ -312,9 +312,8 @@ contract Deploy is Deployer {
         deployERC1967Proxy("OptimismPortalProxy");
     }
 
-
     // Deploy only the L2OO related contracts. Note: requires running _deployRollupContracts first or will revert.
-    function _depolyL2OOContracts() internal{
+    function _depolyL2OOContracts() internal {
         console.log("Deploying and initializing L2OO proxy and implementation");
         deployERC1967Proxy("L2OutputOracleProxy");
         deployL2OutputOracle();
@@ -327,15 +326,15 @@ contract Deploy is Deployer {
         _depolyL2OOContracts();
     }
 
-
-    function runPolymerL2OOContracts()public{
+    function runPolymerL2OOContracts() public {
         _depolyL2OOContracts();
     }
-    function runPolymerRollupOnlyConracts()public{
+
+    function runPolymerRollupOnlyConracts() public {
         _deployRollupContracts();
     }
 
-    function runPolymerContracts()public{
+    function runPolymerContracts() public {
         _deployPolymerL1Contracts();
     }
 
@@ -526,7 +525,7 @@ contract Deploy is Deployer {
         bytes memory initData = abi.encodeCall(
             Safe.setup, (_owners, _threshold, address(0), hex"", address(0), address(0), 0, payable(address(0)))
         );
-        addr_ = address(safeProxyFactory.createProxyWithNonce(address(safeSingleton), initData, uint256(salt)));
+        addr_ = address(safeProxyFactory.createProxyWithNonce(address(safeSingleton), initData, uint256(_implSalt())));
 
         save(_name, addr_);
         console.log("New safe: %s deployed at %s\n    Note that this safe is owned by the deployer key", _name, addr_);
