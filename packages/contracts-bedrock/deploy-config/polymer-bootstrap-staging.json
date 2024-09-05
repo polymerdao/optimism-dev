@@ -1,0 +1,18 @@
+{
+  "l1ChainID": 11155111,
+  "l2BlockTime": 2,
+  "l2ChainID": 901,
+  "l2OutputOracleSubmissionInterval": 120,
+  "l2OutputOracleStartingTimestamp":1725282852,
+  "l2OutputOracleStartingBlockNumber": 1,
+  "l2OutputOracleProposer": "0xef6abfc69070912198bba956aa599a5badc57ba2",
+  "l2OutputOracleChallenger": "0x9Af447ebBffe0371c9f48B8eD578C3df6FDfBd7C",
+  "finalizationPeriodSeconds": 12,
+  "proxyAdminOwner": "0xD2b654e3FD89237F8C8a5d7E1AfB5989A13C886e",
+  "useFaultProofs": false,
+  "batchInboxAddress": "0x4440000000000000000000000000000000000000",
+  "batchSenderAddress": "0xb05e516f04ac76e1ce7c4cbeeb2a34ed8728bb74",
+  "maxSequencerDrift": 600,
+  "sequencerWindowSize": 3600,
+  "channelTimeout": 300
+  }
