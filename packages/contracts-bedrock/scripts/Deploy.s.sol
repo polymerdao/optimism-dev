@@ -508,7 +508,7 @@ contract Deploy is Deployer {
         );
         addr_ = address(
             safeProxyFactory.createProxyWithNonce(
-                address(safeSingleton), initData, uint256(keccak256(abi.encode(_name)))
+                address(safeSingleton), initData, uint256(_implSalt())
             )
         );
 
