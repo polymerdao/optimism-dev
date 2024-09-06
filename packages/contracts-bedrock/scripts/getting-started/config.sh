@@ -19,7 +19,7 @@ reqenv "GS_PROPOSER_ADDRESS"
 reqenv "GS_CHALLENGER_ADDRESS"
 reqenv "L2_CHAIN_ID"
 reqenv "L1_RPC_URL"
-reqenv "DEPLOYMENT_CONFIG_OUT"
+reqenv "DEPLOY_CONFIG_PATH"
 reqenv "BATCH_INBOX_ADDRESS"
 reqenv "MAX_SEQUENCER_DRIFT"
 reqenv "SEQUENCER_WINDOW_SIZE"
@@ -60,4 +60,4 @@ config=$(cat << EOL
 EOL
 )
 
-echo "$config" > $DEPLOYMENT_CONFIG_OUT
+echo "$config" > $DEPLOY_CONFIG_PATH
