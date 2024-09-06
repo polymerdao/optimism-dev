@@ -25,20 +25,18 @@ read -p "Does this look correct? Hit enter to continue..."
 echo "from deployer address $(cast wallet address --private-key $DEPLOYER_KEY)"
 read -p "Does this look correct? Hit enter to continue..."
 
-cd $this_dir
-# First only deploy contracts related to rollup
-forge script \
-    scripts/Deploy.s.sol:Deploy \
-    --sig runPolymerRollupContractsWithStateDiff \
-    --broadcast \
-    --private-key $DEPLOYER_KEY \
-    --rpc-url $L1_RPC_URL \
-    --slow
+# Load Safe proxy deployed from above run to use it to deploy L2OOProxy
+export CONTRACT_ADDRESSES_PATH="./deployments/$CHAIN_ID-deploy.json"
 
+cd $this_dir
+read -p "Reading from contract addresses: "
+cat $CONTRACT_ADDRESSES_PATH
+
+# First only deploy contracts related to rollup
 forge script \
     scripts/Deploy.s.sol:Deploy \
     --sig runPolymerL2OOContractsWithStateDiff \
     --broadcast \
-    --private-key $DEPLOYER_PRIVATE_KEY \
+    --private-key $DEPLOYER_KEY \
     --rpc-url $L1_RPC_URL \
     --slow
