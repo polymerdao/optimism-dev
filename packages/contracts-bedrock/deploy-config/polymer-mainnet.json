@@ -14,5 +14,6 @@
   "batchSenderAddress": "0xafd966b5f7d0c7a35ec785e8788f457b95cf69b1",
   "maxSequencerDrift": 600,
   "sequencerWindowSize": 3600,
-  "channelTimeout": 300
+  "channelTimeout": 300,
+  "l2GenesisBlockGasLimit": "0x1c9c380"
 }

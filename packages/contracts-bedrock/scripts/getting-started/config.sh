@@ -32,119 +32,47 @@ append_with_default() {
 reqenv "GS_ADMIN_ADDRESS"
 reqenv "GS_BATCHER_ADDRESS"
 reqenv "GS_PROPOSER_ADDRESS"
-reqenv "GS_SEQUENCER_ADDRESS"
-reqenv "L1_RPC_URL"
-reqenv "L1_CHAIN_ID"
+reqenv "GS_CHALLENGER_ADDRESS"
 reqenv "L2_CHAIN_ID"
-reqenv "L1_BLOCK_TIME"
-reqenv "L2_BLOCK_TIME"
+reqenv "L1_RPC_URL"
+reqenv "DEPLOYMENT_CONFIG_OUT"
+reqenv "BATCH_INBOX_ADDRESS"
+reqenv "MAX_SEQUENCER_DRIFT"
+reqenv "SEQUENCER_WINDOW_SIZE"
+reqenv "CHANNEL_TIMEOUT"
+reqenv "USE_FAULT_PROOFS"
+reqenv "L2OO_SUBMISSION_INTERVAL"
+reqenv "L2OO_STARTING_TIMESTAMP"
+reqenv "L2OO_STARTING_BLOCK_NUMBER"
+reqenv "FINALIZATION_PERIOD_SECONDS"
 
-# Get the latest block timestamp and hash
-block=$(cast block latest --rpc-url "$L1_RPC_URL")
+# Get the finalized block timestamp and hash
+block=$(cast block finalized --rpc-url "$L1_RPC_URL")
+l1ChainId=$(cast chain-id --rpc-url "$L1_RPC_URL")
 timestamp=$(echo "$block" | awk '/timestamp/ { print $2 }')
 blockhash=$(echo "$block" | awk '/hash/ { print $2 }')
 
-# Start generating the config file in a temporary file
-
-cat << EOL > tmp_config.json
+# Generate the config file
+config=$(cat << EOL
 {
-
- "l1StartingBlockTag": "$blockhash",
-
-  "l1ChainID": $L1_CHAIN_ID,
+  "l1ChainID": $l1ChainId,
+  "l2BlockTime": 2,
   "l2ChainID": $L2_CHAIN_ID,
-  "l2BlockTime": $L2_BLOCK_TIME,
-  "l1BlockTime": $L1_BLOCK_TIME,
-
-  "maxSequencerDrift": 600,
-  "sequencerWindowSize": 3600,
-  "channelTimeout": 300,
-
-  "p2pSequencerAddress": "$GS_SEQUENCER_ADDRESS",
-  "batchInboxAddress": "0xff00000000000000000000000000000000042069",
-  "batchSenderAddress": "$GS_BATCHER_ADDRESS",
-
-  "l2OutputOracleSubmissionInterval": 120,
-  "l2OutputOracleStartingBlockNumber": 0,
-  "l2OutputOracleStartingTimestamp": $timestamp,
-
+  "l2OutputOracleSubmissionInterval": $L2OO_SUBMISSION_INTERVAL,
+  "l2OutputOracleStartingTimestamp": $L2OO_STARTING_TIMESTAMP,
+  "l2OutputOracleStartingBlockNumber": $L2OO_STARTING_BLOCK_NUMBER,
   "l2OutputOracleProposer": "$GS_PROPOSER_ADDRESS",
-  "l2OutputOracleChallenger": "$GS_ADMIN_ADDRESS",
-
-  "finalizationPeriodSeconds": 12,
-
+  "l2OutputOracleChallenger": "$GS_CHALLENGER_ADDRESS",
+  "finalizationPeriodSeconds": $FINALIZATION_PERIOD_SECONDS,
   "proxyAdminOwner": "$GS_ADMIN_ADDRESS",
-  "baseFeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "l1FeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "sequencerFeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "finalSystemOwner": "$GS_ADMIN_ADDRESS",
-  "superchainConfigGuardian": "$GS_ADMIN_ADDRESS",
-
-  "baseFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "l1FeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "sequencerFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "baseFeeVaultWithdrawalNetwork": 0,
-  "l1FeeVaultWithdrawalNetwork": 0,
-  "sequencerFeeVaultWithdrawalNetwork": 0,
-
-  "gasPriceOracleOverhead": 0,
-  "gasPriceOracleScalar": 1000000,
-
-  "enableGovernance": true,
-  "governanceTokenSymbol": "OP",
-  "governanceTokenName": "Optimism",
-  "governanceTokenOwner": "$GS_ADMIN_ADDRESS",
-
-  "l2GenesisBlockGasLimit": "0x1c9c380",
-  "l2GenesisBlockBaseFeePerGas": "0x3b9aca00",
-
-  "eip1559Denominator": 50,
-  "eip1559DenominatorCanyon": 250,
-  "eip1559Elasticity": 6,
-EOL
-
-# Append conditional environment variables with their corresponding default values
-# Activate granite fork
-if [ -n "${GRANITE_TIME_OFFSET}" ]; then
-    append_with_default "l2GenesisGraniteTimeOffset" "GRANITE_TIME_OFFSET" "0x0"
-fi
-# Activate holocene fork
-if [ -n "${HOLOCENE_TIME_OFFSET}" ]; then
-    append_with_default "l2GenesisHoloceneTimeOffset" "HOLOCENE_TIME_OFFSET" "0x0"
-fi
-
-# Activate the interop fork
-if [ -n "${INTEROP_TIME_OFFSET}" ]; then
-    append_with_default "l2GenesisInteropTimeOffset" "INTEROP_TIME_OFFSET" "0x0"
-fi
-
-# Already forked updates
-append_with_default "l2GenesisFjordTimeOffset" "FJORD_TIME_OFFSET" "0x0"
-append_with_default "l2GenesisRegolithTimeOffset" "REGOLITH_TIME_OFFSET" "0x0"
-append_with_default "l2GenesisEcotoneTimeOffset" "ECOTONE_TIME_OFFSET" "0x0"
-append_with_default "l2GenesisDeltaTimeOffset" "DELTA_TIME_OFFSET" "0x0"
-append_with_default "l2GenesisCanyonTimeOffset" "CANYON_TIME_OFFSET" "0x0"
-
-# Continue generating the config file
-cat << EOL >> tmp_config.json
-  "systemConfigStartBlock": 0,
-
-  "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
-
-  "faultGameAbsolutePrestate": "0x03c7ae758795765c6664a5d39bf63841c71ff191e9189522bad8ebff5d4eca98",
-  "faultGameMaxDepth": 44,
-  "faultGameClockExtension": 0,
-  "faultGameMaxClockDuration": 1200,
-  "faultGameGenesisBlock": 0,
-  "faultGameGenesisOutputRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "faultGameSplitDepth": 14,
-  "faultGameWithdrawalDelay": 600,
-
-  "preimageOracleMinProposalSize": 1800000,
-  "preimageOracleChallengePeriod": 300
+  "useFaultProofs": $USE_FAULT_PROOFS,
+  "batchInboxAddress": "$BATCH_INBOX_ADDRESS",
+  "batchSenderAddress": "$GS_BATCHER_ADDRESS",
+  "maxSequencerDrift": $MAX_SEQUENCER_DRIFT,
+  "sequencerWindowSize": $SEQUENCER_WINDOW_SIZE,
+  "channelTimeout": $CHANNEL_TIMEOUT,
+  "l2GenesisBlockGasLimit": "0x1c9c380"
 }
 EOL
 
-# Write the final config file
-mv tmp_config.json "$CONTRACTS_BASE/deploy-config/getting-started.json"
+echo "$config" > $DEPLOYMENT_CONFIG_OUT
