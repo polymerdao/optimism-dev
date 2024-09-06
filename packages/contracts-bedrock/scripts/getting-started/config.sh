@@ -16,93 +16,48 @@ reqenv() {
 reqenv "GS_ADMIN_ADDRESS"
 reqenv "GS_BATCHER_ADDRESS"
 reqenv "GS_PROPOSER_ADDRESS"
-reqenv "GS_SEQUENCER_ADDRESS"
+reqenv "GS_CHALLENGER_ADDRESS"
+reqenv "L2_CHAIN_ID"
 reqenv "L1_RPC_URL"
+reqenv "DEPLOYMENT_CONFIG_OUT"
+reqenv "BATCH_INBOX_ADDRESS"
+reqenv "MAX_SEQUENCER_DRIFT"
+reqenv "SEQUENCER_WINDOW_SIZE"
+reqenv "CHANNEL_TIMEOUT"
+reqenv "USE_FAULT_PROOFS"
+reqenv "L2OO_SUBMISSION_INTERVAL"
+reqenv "L2OO_STARTING_TIMESTAMP"
+reqenv "L2OO_STARTING_BLOCK_NUMBER"
+reqenv "FINALIZATION_PERIOD_SECONDS"
 
 # Get the finalized block timestamp and hash
 block=$(cast block finalized --rpc-url "$L1_RPC_URL")
+l1ChainId=$(cast chain-id --rpc-url "$L1_RPC_URL")
 timestamp=$(echo "$block" | awk '/timestamp/ { print $2 }')
 blockhash=$(echo "$block" | awk '/hash/ { print $2 }')
 
 # Generate the config file
 config=$(cat << EOL
 {
-  "l1StartingBlockTag": "$blockhash",
-
-  "l1ChainID": 11155111,
-  "l2ChainID": 42069,
+  "l1ChainID": $l1ChainId,
   "l2BlockTime": 2,
-  "l1BlockTime": 12,
-
-  "maxSequencerDrift": 600,
-  "sequencerWindowSize": 3600,
-  "channelTimeout": 300,
-
-  "p2pSequencerAddress": "$GS_SEQUENCER_ADDRESS",
-  "batchInboxAddress": "0xff00000000000000000000000000000000042069",
-  "batchSenderAddress": "$GS_BATCHER_ADDRESS",
-
-  "l2OutputOracleSubmissionInterval": 120,
-  "l2OutputOracleStartingBlockNumber": 0,
-  "l2OutputOracleStartingTimestamp": $timestamp,
-
+  "l2ChainID": $L2_CHAIN_ID,
+  "l2OutputOracleSubmissionInterval": $L2OO_SUBMISSION_INTERVAL,
+  "l2OutputOracleStartingTimestamp": $L2OO_STARTING_TIMESTAMP,
+  "l2OutputOracleStartingBlockNumber": $L2OO_STARTING_BLOCK_NUMBER,
   "l2OutputOracleProposer": "$GS_PROPOSER_ADDRESS",
-  "l2OutputOracleChallenger": "$GS_ADMIN_ADDRESS",
-
-  "finalizationPeriodSeconds": 12,
-
+  "l2OutputOracleChallenger": "$GS_CHALLENGER_ADDRESS",
+  "finalizationPeriodSeconds": $FINALIZATION_PERIOD_SECONDS,
   "proxyAdminOwner": "$GS_ADMIN_ADDRESS",
-  "baseFeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "l1FeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "sequencerFeeVaultRecipient": "$GS_ADMIN_ADDRESS",
-  "finalSystemOwner": "$GS_ADMIN_ADDRESS",
-  "superchainConfigGuardian": "$GS_ADMIN_ADDRESS",
-
-  "baseFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "l1FeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "sequencerFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-  "baseFeeVaultWithdrawalNetwork": 0,
-  "l1FeeVaultWithdrawalNetwork": 0,
-  "sequencerFeeVaultWithdrawalNetwork": 0,
-
-  "gasPriceOracleOverhead": 0,
-  "gasPriceOracleScalar": 1000000,
-
-  "enableGovernance": true,
-  "governanceTokenSymbol": "OP",
-  "governanceTokenName": "Optimism",
-  "governanceTokenOwner": "$GS_ADMIN_ADDRESS",
-
-  "l2GenesisBlockGasLimit": "0x1c9c380",
-  "l2GenesisBlockBaseFeePerGas": "0x3b9aca00",
-  "l2GenesisRegolithTimeOffset": "0x0",
-
-  "eip1559Denominator": 50,
-  "eip1559DenominatorCanyon": 250,
-  "eip1559Elasticity": 6,
-
-  "l2GenesisEcotoneTimeOffset": "0x0",
-  "l2GenesisDeltaTimeOffset": "0x0",
-  "l2GenesisCanyonTimeOffset": "0x0",
-
-  "systemConfigStartBlock": 0,
-
-  "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
-
-  "faultGameAbsolutePrestate": "0x03c7ae758795765c6664a5d39bf63841c71ff191e9189522bad8ebff5d4eca98",
-  "faultGameMaxDepth": 44,
-  "faultGameClockExtension": 0,
-  "faultGameMaxClockDuration": 600,
-  "faultGameGenesisBlock": 0,
-  "faultGameGenesisOutputRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "faultGameSplitDepth": 14,
-
-  "preimageOracleMinProposalSize": 1800000,
-  "preimageOracleChallengePeriod": 86400
+  "useFaultProofs": $USE_FAULT_PROOFS,
+  "batchInboxAddress": "$BATCH_INBOX_ADDRESS",
+  "batchSenderAddress": "$GS_BATCHER_ADDRESS",
+  "maxSequencerDrift": $MAX_SEQUENCER_DRIFT,
+  "sequencerWindowSize": $SEQUENCER_WINDOW_SIZE,
+  "channelTimeout": $CHANNEL_TIMEOUT,
+  "l2GenesisBlockGasLimit": "0x1c9c380"
 }
 EOL
 )
 
-# Write the config file
-echo "$config" > deploy-config/getting-started.json
+echo "$config" > $DEPLOYMENT_CONFIG_OUT
