@@ -1,11 +1,16 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
+	"net/http"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -66,6 +71,72 @@ func (s *LocalSigner) Sign(ctx context.Context, domain [32]byte, chainID *big.In
 
 func (s *LocalSigner) Close() error {
 	s.priv = nil
+	return nil
+}
+
+type RemoteSigner struct {
+	endpoint string
+	hasher   func(domain [32]byte, chainID *big.Int, payloadBytes []byte) (common.Hash, error)
+}
+
+func NewRemoteSigner(endpoint string) *RemoteSigner {
+	return &RemoteSigner{endpoint: endpoint, hasher: SigningHash}
+}
+
+func (s *RemoteSigner) Sign(ctx context.Context, domain [32]byte, chainID *big.Int, encodedMsg []byte) (sig *[65]byte, err error) {
+	signingHash, err := s.hasher(domain, chainID, encodedMsg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to compute signing hash: %w", err)
+	}
+
+	reqBody := struct {
+		SigningHash string `json:"signing_hash"`
+	}{
+		SigningHash: signingHash.Hex(),
+	}
+
+	jsonBody, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", s.endpoint, bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var respBody struct {
+		Signature string `json:"signature"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	signatureBytes, err := hex.DecodeString(respBody.Signature)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode signature: %w", err)
+	}
+
+	if len(signatureBytes) != 65 {
+		return nil, fmt.Errorf("invalid signature length: got %d, want 65", len(signatureBytes))
+	}
+
+	return (*[65]byte)(signatureBytes), nil
+}
+
+func (s *RemoteSigner) Close() error {
 	return nil
 }
 

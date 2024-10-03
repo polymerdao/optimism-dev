@@ -28,7 +28,10 @@ func LoadSignerSetup(ctx *cli.Context) (p2p.SignerSetup, error) {
 		return &p2p.PreparedSigner{Signer: p2p.NewLocalSigner(priv)}, nil
 	}
 
-	// TODO: create remote signer
+	endpoint := ctx.String(flags.SequencerP2PSignerEndpoint)
+	if endpoint != "" {
+		return &p2p.PreparedSigner{Signer: p2p.NewRemoteSigner(endpoint)}, nil
+	}
 
 	return nil, nil
 }
