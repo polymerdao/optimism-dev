@@ -308,6 +308,14 @@ func L1BlockInfoFromBytes(rollupCfg *rollup.Config, l2BlockTime uint64, data []b
 	return &info, info.unmarshalBinaryBedrock(data)
 }
 
+// This is a simple wrapper for marshalling blocks
+func L1BlockInfoToBytes(rollupCfg *rollup.Config, l2BlockTime uint64, block L1BlockInfo) ([]byte, error) {
+	if isEcotoneButNotFirstBlock(rollupCfg, l2BlockTime) {
+		return block.marshalBinaryEcotone()
+	}
+	return block.marshalBinaryBedrock()
+}
+
 // L1InfoDeposit creates a L1 Info deposit transaction based on the L1 block,
 // and the L2 block-height difference with the start of the epoch.
 func L1InfoDeposit(rollupCfg *rollup.Config, sysCfg eth.SystemConfig, seqNumber uint64, block eth.BlockInfo, l2Timestamp uint64) (*types.DepositTx, error) {
