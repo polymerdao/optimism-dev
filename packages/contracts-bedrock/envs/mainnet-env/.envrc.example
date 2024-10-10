@@ -1,0 +1,24 @@
+##################################################
+#                Generating deploy config        #
+##################################################
+
+# Admin account
+export L2_CHAIN_ID=444
+export GS_ADMIN_ADDRESS=0x1B4446dd435249f05ff6C152ea7935E81c153a77
+
+# Batcher account
+export GS_BATCHER_ADDRESS=0xafd966b5f7d0c7a35ec785e8788f457b95cf69b1
+export GS_PROPOSER_ADDRESS=0xc689757a01a882e1e05fc8b950b45d2c986dce44
+export GS_CHALLENGER_ADDRESS=0xcc7bfec5a569899216fc109661977b339eec160b
+export L1_RPC_URL=
+export DEPLOY_CONFIG_PATH=$(pwd)/polymer-mainnet.json
+export BATCH_INBOX_ADDRESS=0x4440000000000000000000000000000000000000
+export MAX_SEQUENCER_DRIFT=600
+export SEQUENCER_WINDOW_SIZE=3600
+export CHANNEL_TIMEOUT=300
+
+export USE_FAULT_PROOFS=false
+export L2OO_SUBMISSION_INTERVAL=1800
+export L2OO_STARTING_TIMESTAMP=1686068903
+export L2OO_STARTING_BLOCK_NUMBER=105235063
+export FINALIZATION_PERIOD_SECONDS=604800
