@@ -354,6 +354,59 @@ contract Deploy is Deployer {
         console.log("set up op chain!");
     }
 
+    // Deploy only the contracts that are required to generate a rollup config
+    function _deployRollupContracts() internal {
+        console.log("Deploying L1 contracts that are needed to generate peptide rollup config");
+        deploySafe("SystemOwnerSafe");
+        deployAddressManager(); // Address manager is required for the ProxyAdmin
+        deployProxyAdmin();
+        transferProxyAdminOwnership(); // transfers proxy admin ownership to safe
+        deployERC1967Proxy("OptimismPortalProxy");
+    }
+
+    // Deploy only the L2OO related contracts. Note: requires running _deployRollupContracts first or will revert.
+    function _depolyL2OOContracts() internal {
+        console.log("Deploying and initializing L2OO proxy and implementation");
+        deployERC1967Proxy("L2OutputOracleProxy");
+        deployL2OutputOracle();
+        initializeL2OutputOracle();
+    }
+
+    // Deploy specific contracts for polymer
+    function _deployPolymerL1Contracts() internal {
+        _deployRollupContracts();
+        _depolyL2OOContracts();
+    }
+
+    function runPolymerL2OOContracts() public {
+        _depolyL2OOContracts();
+    }
+
+    function runPolymerRollupOnlyConracts() public {
+        _deployRollupContracts();
+    }
+
+    function runPolymerContracts() public {
+        _deployPolymerL1Contracts();
+    }
+
+    function runPolymerRollupContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _deployRollupContracts();
+        vm.dumpState(Config.stateDumpPath("rollupOnly"));
+    }
+
+    function runPolymerL2OOContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _depolyL2OOContracts();
+        vm.dumpState(Config.stateDumpPath("L2OO"));
+    }
+
+    function runPolymerContractsWithStateDump() public {
+        vm.chainId(cfg.l1ChainID());
+        _deployPolymerL1Contracts();
+        vm.dumpState(Config.stateDumpPath(""));
+    }
     ////////////////////////////////////////////////////////////////
     //           High Level Deployment Functions                  //
     ////////////////////////////////////////////////////////////////
@@ -524,7 +577,7 @@ contract Deploy is Deployer {
         bytes memory initData = abi.encodeCall(
             Safe.setup, (_owners, _threshold, address(0), hex"", address(0), address(0), 0, payable(address(0)))
         );
-        addr_ = address(safeProxyFactory.createProxyWithNonce(address(safeSingleton), initData, uint256(salt)));
+        addr_ = address(safeProxyFactory.createProxyWithNonce(address(safeSingleton), initData, uint256(_implSalt())));
 
         save(_name, addr_);
         console.log("New safe: %s deployed at %s\n    Note that this safe is owned by the deployer key", _name, addr_);
@@ -1270,7 +1323,7 @@ contract Deploy is Deployer {
         console.log("L2OutputOracle version: %s", version);
 
         ChainAssertions.checkL2OutputOracle({
-            _contracts: _proxies(),
+            _contracts: _proxiesUnstrict(),
             _cfg: cfg,
             _l2OutputOracleStartingTimestamp: cfg.l2OutputOracleStartingTimestamp(),
             _isProxy: true
