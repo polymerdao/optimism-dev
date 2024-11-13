@@ -102,6 +102,7 @@ func NewConfig(ctx *cli.Context, log log.Logger) (*node.Config, error) {
 		P2P:                         p2pConfig,
 		P2PSigner:                   p2pSignerSetup,
 		L1EpochPollInterval:         ctx.Duration(flags.L1EpochPollIntervalFlag.Name),
+		L1TrackerCache:              ctx.Int(flags.L1TrackerCacheFlag.Name),
 		RuntimeConfigReloadInterval: ctx.Duration(flags.RuntimeConfigReloadIntervalFlag.Name),
 		ConfigPersistence:           configPersistence,
 		SafeDBPath:                  ctx.String(flags.SafeDBPath.Name),
