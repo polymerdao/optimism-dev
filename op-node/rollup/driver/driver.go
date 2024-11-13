@@ -162,6 +162,7 @@ func NewDriver(
 	cfg *rollup.Config,
 	l2 L2Chain,
 	l1 L1Chain,
+	l1TrackerCache int,
 	supervisor interop.InteropBackend, // may be nil pre-interop.
 	l1Blobs derive.L1BlobsFetcher,
 	altSync AltSync,
@@ -189,7 +190,7 @@ func NewDriver(
 	statusTracker := status.NewStatusTracker(log, metrics)
 	sys.Register("status", statusTracker, opts)
 
-	l1Tracker := status.NewL1Tracker(l1)
+	l1Tracker := status.NewL1Tracker(l1, l1TrackerCache)
 	sys.Register("l1-blocks", l1Tracker, opts)
 
 	l1 = NewMeteredL1Fetcher(l1Tracker, metrics)

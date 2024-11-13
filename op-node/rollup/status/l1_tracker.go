@@ -16,10 +16,10 @@ type L1Tracker struct {
 	cache *l1HeadBuffer
 }
 
-func NewL1Tracker(inner derive.L1Fetcher) *L1Tracker {
+func NewL1Tracker(inner derive.L1Fetcher, cache int) *L1Tracker {
 	return &L1Tracker{
 		L1Fetcher: inner,
-		cache:     newL1HeadBuffer(1000),
+		cache:     newL1HeadBuffer(cache),
 	}
 }
 
