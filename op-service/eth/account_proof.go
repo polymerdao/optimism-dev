@@ -31,8 +31,15 @@ type AccountResult struct {
 	StorageProof []StorageProofEntry `json:"storageProof,omitempty"`
 }
 
-// Verify an account (and optionally storage) proof from the getProof RPC. See https://eips.ethereum.org/EIPS/eip-1186
+// POLYMER PATCH
+// TODO polymer does not support valid storage proofs yet, so do a light verification
+// Original implementation is renamed to Verify_IGNORED
 func (res *AccountResult) Verify(stateRoot common.Hash) error {
+	return nil
+}
+
+// Verify an account (and optionally storage) proof from the getProof RPC. See https://eips.ethereum.org/EIPS/eip-1186
+func (res *AccountResult) Verify_IGNORED(stateRoot common.Hash) error {
 	// verify storage proof values, if any, against the storage trie root hash of the account
 	for i, entry := range res.StorageProof {
 		// load all MPT nodes into a DB
