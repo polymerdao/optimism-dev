@@ -319,6 +319,59 @@ contract Deploy is Deployer {
         console.log("set up op chain!");
     }
 
+    // Deploy only the contracts that are required to generate a rollup config
+    function _deployRollupContracts() internal {
+        console.log("Deploying L1 contracts that are needed to generate peptide rollup config");
+        deploySafe("SystemOwnerSafe");
+        deployAddressManager(); // Address manager is required for the ProxyAdmin
+        deployProxyAdmin();
+        transferProxyAdminOwnership(); // transfers proxy admin ownership to safe
+        deployERC1967Proxy("OptimismPortalProxy");
+    }
+
+    // Deploy only the L2OO related contracts. Note: requires running _deployRollupContracts first or will revert.
+    function _depolyL2OOContracts() internal {
+        console.log("Deploying and initializing L2OO proxy and implementation");
+        deployERC1967Proxy("L2OutputOracleProxy");
+        deployL2OutputOracle();
+        initializeL2OutputOracle();
+    }
+
+    // Deploy specific contracts for polymer
+    function _deployPolymerL1Contracts() internal {
+        _deployRollupContracts();
+        _depolyL2OOContracts();
+    }
+
+    function runPolymerL2OOContracts() public {
+        _depolyL2OOContracts();
+    }
+
+    function runPolymerRollupOnlyConracts() public {
+        _deployRollupContracts();
+    }
+
+    function runPolymerContracts() public {
+        _deployPolymerL1Contracts();
+    }
+
+    function runPolymerRollupContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _deployRollupContracts();
+        vm.dumpState(Config.stateDumpPath("rollupOnly"));
+    }
+
+    function runPolymerL2OOContractsWithStateDiff() public stateDiff {
+        vm.chainId(cfg.l1ChainID());
+        _depolyL2OOContracts();
+        vm.dumpState(Config.stateDumpPath("L2OO"));
+    }
+
+    function runPolymerContractsWithStateDump() public {
+        vm.chainId(cfg.l1ChainID());
+        _deployPolymerL1Contracts();
+        vm.dumpState(Config.stateDumpPath(""));
+    }
     ////////////////////////////////////////////////////////////////
     //           High Level Deployment Functions                  //
     ////////////////////////////////////////////////////////////////
@@ -506,6 +559,70 @@ contract Deploy is Deployer {
     ////////////////////////////////////////////////////////////////
     //              Non-Proxied Deployment Functions              //
     ////////////////////////////////////////////////////////////////
+
+    /// @notice Deploy the Safe
+    function deploySafe(string memory _name) public broadcast returns (address addr_) {
+        address[] memory owners = new address[](0);
+        addr_ = deploySafe(_name, owners, 1, true);
+    }
+
+    /// @notice Deploy a new Safe contract. If the keepDeployer option is used to enable further setup actions, then
+    ///         the removeDeployerFromSafe() function should be called on that safe after setup is complete.
+    ///         Note this function does not have the broadcast modifier.
+    /// @param _name The name of the Safe to deploy.
+    /// @param _owners The owners of the Safe.
+    /// @param _threshold The threshold of the Safe.
+    /// @param _keepDeployer Wether or not the deployer address will be added as an owner of the Safe.
+    function deploySafe(
+        string memory _name,
+        address[] memory _owners,
+        uint256 _threshold,
+        bool _keepDeployer
+    )
+        public
+        returns (address addr_)
+    {
+        bytes32 salt = keccak256(abi.encode(_name, _implSalt()));
+        console.log("Deploying safe: %s with salt %s", _name, vm.toString(salt));
+        (SafeProxyFactory safeProxyFactory, Safe safeSingleton) = _getSafeFactory();
+
+        if (_keepDeployer) {
+            address[] memory expandedOwners = new address[](_owners.length + 1);
+            // By always adding msg.sender first we know that the previousOwner will be SENTINEL_OWNERS, which makes it
+            // easier to call removeOwner later.
+            expandedOwners[0] = msg.sender;
+            for (uint256 i = 0; i < _owners.length; i++) {
+                expandedOwners[i + 1] = _owners[i];
+            }
+            _owners = expandedOwners;
+        }
+
+        bytes memory initData = abi.encodeCall(
+            Safe.setup, (_owners, _threshold, address(0), hex"", address(0), address(0), 0, payable(address(0)))
+        );
+        addr_ = address(safeProxyFactory.createProxyWithNonce(address(safeSingleton), initData, uint256(_implSalt())));
+
+        save(_name, addr_);
+        console.log("New safe: %s deployed at %s\n    Note that this safe is owned by the deployer key", _name, addr_);
+    }
+
+    /// @notice If the keepDeployer option was used with deploySafe(), this function can be used to remove the deployer.
+    ///         Note this function does not have the broadcast modifier.
+    function removeDeployerFromSafe(string memory _name, uint256 _newThreshold) public {
+        Safe safe = Safe(mustGetAddress(_name));
+
+        // The sentinel address is used to mark the start and end of the linked list of owners in the Safe.
+        address sentinelOwners = address(0x1);
+
+        // Because deploySafe() always adds msg.sender first (if keepDeployer is true), we know that the previousOwner
+        // will be sentinelOwners.
+        _callViaSafe({
+            _safe: safe,
+            _target: address(safe),
+            _data: abi.encodeCall(OwnerManager.removeOwner, (sentinelOwners, msg.sender, _newThreshold))
+        });
+        console.log("Removed deployer owner from ", _name);
+    }
 
     /// @notice Deploy the AddressManager
     function deployAddressManager() public broadcast returns (address addr_) {
@@ -880,7 +997,7 @@ contract Deploy is Deployer {
         console.log("L2OutputOracle version: %s", version);
 
         ChainAssertions.checkL2OutputOracle({
-            _contracts: _proxies(),
+            _contracts: _proxiesUnstrict(),
             _cfg: cfg,
             _l2OutputOracleStartingTimestamp: cfg.l2OutputOracleStartingTimestamp(),
             _isProxy: true
