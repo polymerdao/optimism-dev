@@ -46,6 +46,9 @@ type Config struct {
 	// Used to poll the L1 for new finalized or safe blocks
 	L1EpochPollInterval time.Duration
 
+	// Number of L1 headers to cache in L1 Tracker
+	L1TrackerCache int
+
 	ConfigPersistence ConfigPersistence
 
 	// Path to store safe head database. Disabled when set to empty string
