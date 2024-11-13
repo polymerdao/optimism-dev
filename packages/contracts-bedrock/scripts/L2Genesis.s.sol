@@ -558,6 +558,13 @@ contract L2Genesis is Deployer {
     /// @notice Sets all the preinstalls.
     function setPreinstalls() public {
         address tmpSetPreinstalls = address(uint160(uint256(keccak256("SetPreinstalls"))));
+        // FIXME: this could be a bug in v1.9.3. Our env is doing the exact same thing as the devnet scripts
+        // There's a new op-chain-ops module that does have "preinstalls" related code but couldn't figure out
+        // how to use it or if it would make a difference.
+        // Failing to add this will cause the following error:
+        //      [Revert] cheatcodes are not enabled for 0xc90c3c00284FBc96aCecFAFf421785B8e60802f8;
+        // where 0xc90c3c00284FBc96aCecFAFf421785B8e60802f8 is tmpSetPreinstalls
+        vm.allowCheatcodes(tmpSetPreinstalls);
         vm.etch(tmpSetPreinstalls, vm.getDeployedCode("SetPreinstalls.s.sol:SetPreinstalls"));
         SetPreinstalls(tmpSetPreinstalls).setPreinstalls();
         vm.etch(tmpSetPreinstalls, "");
