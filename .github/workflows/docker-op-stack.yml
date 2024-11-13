@@ -1,0 +1,65 @@
+name: docker-peptide
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+env:
+  IMAGE_NAME: ghcr.io/polymerdao/optimism
+
+jobs:
+  docker-build-peptide:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: ${{ github.event.inputs.build-ref }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: |
+            ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{raw}}
+          flavor: |
+            latest=false
+          labels: |
+            org.opencontainers.image.source=https://github.com/polymerdao/optimism-dev
+            org.opencontainers.image.title=polymer
+            org.opencontainers.image.url=https://github.com/polymerdao/optimism-dev
+
+      - name: Authenticate Docker
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build Docker images
+        run: |
+          docker buildx bake \
+          		--progress plain \
+          		--load \
+          		-f docker-bake.hcl \
+          		op-node op-batcher op-proposer op-challenger
+        env:
+          REGISTRY: ghcr.io
+          REPOSITORY: polymerdao/optimism
+          IMAGE_TAGS: ${{ github.ref_name }}
+          GIT_COMMIT: ${{ github.github_sha }}
+
+      - name: Push Docker images
+        run: |
+          IMAGES=("op-node" "op-batcher" "op-proposer" "op-challenger")
+          for image in "${IMAGES[@]}"
+          do
+            echo "Pushing $image"
+            docker push ghcr.io/polymerdao/optimism/$image:${{ github.ref_name }}
+          done
