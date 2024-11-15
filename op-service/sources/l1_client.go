@@ -28,10 +28,18 @@ func L1ClientDefaultConfig(config *rollup.Config, trustRPC bool, kind RPCProvide
 	return L1ClientSimpleConfig(trustRPC, kind, span)
 }
 
+var l1ClientCacheCap int = 1000
+
+// SetL1ClientCacheCap sets the cap of the L1 client cache.
+// Cache size is min(span, cap), where span is the 3/2 worth of sequencing window.
+func SetL1ClientCacheCap(cap int) {
+	l1ClientCacheCap = cap
+}
+
 func L1ClientSimpleConfig(trustRPC bool, kind RPCProviderKind, cacheSize int) *L1ClientConfig {
 	span := cacheSize
-	if span > 1000 { // sanity cap. If a large sequencing window is configured, do not make the cache too large
-		span = 1000
+	if span > l1ClientCacheCap { // sanity cap. If a large sequencing window is configured, do not make the cache too large
+		span = l1ClientCacheCap
 	}
 	return &L1ClientConfig{
 		EthClientConfig: EthClientConfig{

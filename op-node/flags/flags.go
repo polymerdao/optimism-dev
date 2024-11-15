@@ -245,9 +245,16 @@ var (
 	}
 	L1TrackerCacheFlag = &cli.IntFlag{
 		Name:     "l1.tracker-cache",
-		Usage:    "Number of L1 headers to cache in L1 Tracker's head buffer.",
+		Usage:    "Number of L1BlockRefs to cache in L1 Tracker.",
 		EnvVars:  prefixEnvVars("L1_TRACKER_CACHE"),
 		Value:    2000,
+		Category: L1RPCCategory,
+	}
+	L1ClientCacheCapFlag = &cli.IntFlag{
+		Name:     "l1.client-cache-size",
+		Usage:    "Cap of number of L1 block worth of cached {receipts, transactions, headers, payload} for L1 client.",
+		EnvVars:  prefixEnvVars("L1_CLIENT_CACHE_SIZE"),
+		Value:    1000,
 		Category: L1RPCCategory,
 	}
 	RuntimeConfigReloadIntervalFlag = &cli.DurationFlag{
@@ -409,6 +416,7 @@ var optionalFlags = []cli.Flag{
 	SequencerL1Confs,
 	L1EpochPollIntervalFlag,
 	L1TrackerCacheFlag,
+	L1ClientCacheCapFlag,
 	RuntimeConfigReloadIntervalFlag,
 	RPCEnableAdmin,
 	RPCAdminPersistence,

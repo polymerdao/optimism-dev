@@ -45,6 +45,9 @@ type Config struct {
 	// Number of L1 headers to cache in L1 Tracker
 	L1TrackerCache int
 
+	// Cap of number of L1 block worth of cached {receipts, transactions, headers, payload} for L1 client.
+	L1ClientCacheCap int
+
 	ConfigPersistence ConfigPersistence
 
 	// Path to store safe head database. Disabled when set to empty string
