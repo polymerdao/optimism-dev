@@ -183,6 +183,9 @@ func (n *OpNode) initTracer(ctx context.Context, cfg *Config) error {
 }
 
 func (n *OpNode) initL1(ctx context.Context, cfg *Config) error {
+	// update L1 client cache cap before creating the L1 client
+	sources.SetL1ClientCacheCap(cfg.L1ClientCacheCap)
+
 	l1Node, rpcCfg, err := cfg.L1.Setup(ctx, n.log, &cfg.Rollup)
 	if err != nil {
 		return fmt.Errorf("failed to get L1 RPC client: %w", err)
