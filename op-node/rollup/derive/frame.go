@@ -15,6 +15,26 @@ import (
 // but we leave space to grow larger anyway (gas limit allows for more data).
 const MaxFrameLen = 1_000_000
 
+/**
+When altDA is enabled, the max frame length is determined by the altDA provider instead of L1 Tx limit.
+A final L1 tx only includes an altDA commitment, not the original channel frame data sent to altDA.
+*/
+
+// maxFrameLenForAllDA is the maximum frame length for both ethDA and altDA.
+// It defaults to MaxFrameLen, but should be overriden with `SetMaxFrameLenForAllDA(..)` if altDA is enabled.
+var maxFrameLenForAllDA uint32 = MaxFrameLen
+
+// GetMaxFrameLenForAllDA returns the maximum frame length for both ethDA and altDA
+func GetMaxFrameLenForAllDA() uint32 {
+	return maxFrameLenForAllDA
+}
+
+// SetMaxFrameLenForAllDA sets the maximum frame length for both ethDA and altDA
+// This should be called if altDA is enabled.
+func SetMaxFrameLenForAllDA(maxFrameLen uint32) {
+	maxFrameLenForAllDA = maxFrameLen
+}
+
 // Data Format
 //
 // frame = channel_id ++ frame_number ++ frame_data_length ++ frame_data ++ is_last
@@ -87,9 +107,9 @@ func (f *Frame) UnmarshalBinary(r ByteReader) error {
 		return fmt.Errorf("reading frame_data_length: %w", eofAsUnexpectedMissing(err))
 	}
 
-	// Cap frame length to MaxFrameLen (currently 1MB)
-	if frameLength > MaxFrameLen {
-		return fmt.Errorf("frame_data_length is too large: %d", frameLength)
+	// Cap frame length to GetMaxFrameLenForAllDA
+	if frameLength > GetMaxFrameLenForAllDA() {
+		return fmt.Errorf("frame_data_length is too large: %d, capped at %d", frameLength, GetMaxFrameLenForAllDA())
 	}
 	f.Data = make([]byte, int(frameLength))
 	if _, err := io.ReadFull(r, f.Data); err != nil {
