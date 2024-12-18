@@ -185,7 +185,7 @@ func (c *CLIConfig) Check() error {
 
 // NewConfig parses the Config from the provided flags or environment variables.
 func NewConfig(ctx *cli.Context) *CLIConfig {
-	return &CLIConfig{
+	cfg := &CLIConfig{
 		/* Required Flags */
 		L1EthRpc:        ctx.String(flags.L1EthRpcFlag.Name),
 		L2EthRpc:        ctx.String(flags.L2EthRpcFlag.Name),
@@ -220,4 +220,11 @@ func NewConfig(ctx *cli.Context) *CLIConfig {
 		ThrottleAlwaysBlockSize:      ctx.Uint64(flags.ThrottleAlwaysBlockSizeFlag.Name),
 		PreferLocalSafeL2:            ctx.Bool(flags.PreferLocalSafeL2Flag.Name),
 	}
+
+	// altDA specific settings
+	if cfg.AltDA.Enabled {
+		derive.SetMaxFrameLenForAllDA(altda.MaxInputSize)
+	}
+
+	return cfg
 }

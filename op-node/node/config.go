@@ -13,6 +13,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/flags"
 	"github.com/ethereum-optimism/optimism/op-node/p2p"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
+	"github.com/ethereum-optimism/optimism/op-node/rollup/derive"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/driver"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/interop"
 	"github.com/ethereum-optimism/optimism/op-node/rollup/sync"
@@ -195,6 +196,10 @@ func (cfg *Config) Check() error {
 	}
 	if cfg.AltDA.Enabled {
 		log.Warn("Alt-DA Mode is a Beta feature of the MIT licensed OP Stack.  While it has received initial review from core contributors, it is still undergoing testing, and may have bugs or other issues.")
+
+		// Update the max frame size for altDA mode; otherwise channel frames from altDA are likely to exceed the
+		// default max frame size (1MB) and thus get discarded by op-node during block derivation.
+		derive.SetMaxFrameLenForAllDA(altda.MaxInputSize)
 	}
 	return nil
 }
