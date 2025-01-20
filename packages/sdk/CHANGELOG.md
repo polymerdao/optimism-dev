@@ -241,7 +241,7 @@
 
 ### Minor Changes
 
-- c975c9620: Add suppory for finalizing legacy withdrawals after the Bedrock migration
+- c975c9620: Add support for finalizing legacy withdrawals after the Bedrock migration
 
 ### Patch Changes
 
