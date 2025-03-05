@@ -131,6 +131,9 @@ type RPCHeader struct {
 	// ParentBeaconRoot was added by EIP-4788 and is ignored in legacy headers.
 	ParentBeaconRoot *common.Hash `json:"parentBeaconBlockRoot,omitempty"`
 
+	// RequestsHash was added by EIP-7685 and is ignored in legacy headers.
+	RequestsHash *common.Hash `json:"requestsHash,omitempty" rlp:"optional"`
+
 	// untrusted info included by RPC, may have to be checked
 	Hash common.Hash `json:"hash"`
 }
@@ -186,6 +189,8 @@ func (hdr *RPCHeader) createGethHeader() *types.Header {
 		BlobGasUsed:      (*uint64)(hdr.BlobGasUsed),
 		ExcessBlobGas:    (*uint64)(hdr.ExcessBlobGas),
 		ParentBeaconRoot: hdr.ParentBeaconRoot,
+		// Prague
+		RequestsHash: hdr.RequestsHash,
 	}
 }
 
@@ -315,6 +320,7 @@ func (block *RPCBlock) ExecutionPayloadEnvelope(trustCache bool) (*eth.Execution
 	return &eth.ExecutionPayloadEnvelope{
 		ParentBeaconBlockRoot: block.ParentBeaconRoot,
 		ExecutionPayload:      payload,
+		RequestsHash:          block.RequestsHash,
 	}, nil
 }
 
