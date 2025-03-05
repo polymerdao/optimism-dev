@@ -45,10 +45,10 @@ jobs:
       - name: Build Docker images
         run: |
           docker buildx bake \
-          		--progress plain \
-          		--load \
-          		-f docker-bake.hcl \
-          		op-node op-batcher op-proposer op-challenger
+              --progress plain \
+              --load \
+              -f docker-bake.hcl \
+              op-node op-batcher
         env:
           REGISTRY: ghcr.io
           REPOSITORY: polymerdao/optimism
@@ -57,7 +57,7 @@ jobs:
 
       - name: Push Docker images
         run: |
-          IMAGES=("op-node" "op-batcher" "op-proposer" "op-challenger")
+          IMAGES=("op-node" "op-batcher")
           for image in "${IMAGES[@]}"
           do
             echo "Pushing $image"
