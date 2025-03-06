@@ -143,6 +143,10 @@ func DeployConfig(allocType AllocType) *genesis.DeployConfig {
 }
 
 func init() {
+	// FIXME this whole code is loaded when the opstack is used as a dependency from within a different repo
+	// (peptide, p2p-sentry-db, etc)
+	// we don't care about the op-e2e stuff for now so let's get rid of all this
+	return
 	cwd, err := os.Getwd()
 	if err != nil {
 		panic(err)
