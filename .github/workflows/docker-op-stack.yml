@@ -6,7 +6,7 @@ on:
       - "v*.*.*"
 env:
   IMAGE_NAME: ghcr.io/polymerdao/optimism
-  IMAGES: "op-node op-batcher"
+  IMAGES: "op-node op-batcher da-server"
 
 jobs:
   docker-build-peptide:
