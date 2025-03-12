@@ -639,12 +639,12 @@ func (n *OpNode) PublishL2Payload(ctx context.Context, envelope *eth.ExecutionPa
 	return nil
 }
 
-func (n *OpNode) OnUnsafeL2Payload(ctx context.Context, from peer.ID, envelope *eth.ExecutionPayloadEnvelope) error {
+func (n *OpNode) OnUnsafeL2Payload(ctx context.Context, from peer.ID, wrapper *p2p.ExecutionPayloadWrapper) error {
 	// ignore if it's from ourselves
 	if p2pNode := n.getP2PNodeIfEnabled(); p2pNode != nil && from == p2pNode.Host().ID() {
 		return nil
 	}
-
+	envelope := wrapper.Envelope
 	n.tracer.OnUnsafeL2Payload(ctx, from, envelope)
 
 	n.log.Info("Received signed execution payload from p2p", "id", envelope.ExecutionPayload.ID(), "peer", from,
