@@ -421,8 +421,17 @@ func BuildBlocksValidator(log log.Logger, cfg *rollup.Config, runCfg GossipRunti
 		// but validator concurrency is limited anyway)
 		seen.markSeen(payload.BlockHash)
 
+		// make sure to copy the raw data over to prevent it from being overwritten by other threads later on
+		rawdata := make([]byte, len(data))
+		copy(rawdata, data)
+		wrapper := ExecutionPayloadWrapper{
+			Envelope:     &envelope,
+			RawData:      rawdata,
+			BlockVersion: blockVersion,
+		}
+
 		// remember the decoded payload for later usage in topic subscriber.
-		message.ValidatorData = &envelope
+		message.ValidatorData = &wrapper
 		return pubsub.ValidationAccept
 	}
 }
@@ -447,8 +456,15 @@ func verifyBlockSignature(log log.Logger, cfg *rollup.Config, runCfg GossipRunti
 	return pubsub.ValidationAccept
 }
 
+// This is used by our p2p-sentry-db to get access to the signature and signed payload
+type ExecutionPayloadWrapper struct {
+	Envelope     *eth.ExecutionPayloadEnvelope
+	RawData      []byte
+	BlockVersion eth.BlockVersion
+}
+
 type GossipIn interface {
-	OnUnsafeL2Payload(ctx context.Context, from peer.ID, msg *eth.ExecutionPayloadEnvelope) error
+	OnUnsafeL2Payload(ctx context.Context, from peer.ID, msg *ExecutionPayloadWrapper) error
 }
 
 type GossipTopicInfo interface {
@@ -707,9 +723,9 @@ func newBlockTopic(ctx context.Context, topicId string, ps *pubsub.PubSub, log l
 type TopicSubscriber func(ctx context.Context, sub *pubsub.Subscription)
 type MessageHandler func(ctx context.Context, from peer.ID, msg any) error
 
-func BlocksHandler(onBlock func(ctx context.Context, from peer.ID, msg *eth.ExecutionPayloadEnvelope) error) MessageHandler {
+func BlocksHandler(onBlock func(ctx context.Context, from peer.ID, msg *ExecutionPayloadWrapper) error) MessageHandler {
 	return func(ctx context.Context, from peer.ID, msg any) error {
-		payload, ok := msg.(*eth.ExecutionPayloadEnvelope)
+		payload, ok := msg.(*ExecutionPayloadWrapper)
 		if !ok {
 			return fmt.Errorf("expected topic validator to parse and validate data into execution payload, but got %T", msg)
 		}
