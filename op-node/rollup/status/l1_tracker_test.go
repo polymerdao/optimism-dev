@@ -23,7 +23,7 @@ func newL1HeadEvent(l1Tracker *L1Tracker, head eth.L1BlockRef) {
 func TestCachingHeadReorg(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// no blocks added to cache yet
 	l1Head := mockL1BlockRef(99)
@@ -71,7 +71,7 @@ func TestCachingHeadReorg(t *testing.T) {
 func TestCachingHeadRewind(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// no blocks added to cache yet
 	l1Head := mockL1BlockRef(99)
@@ -126,7 +126,7 @@ func TestCachingHeadRewind(t *testing.T) {
 func TestCachingChainShorteningReorg(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// no blocks added to cache yet
 	l1Head := mockL1BlockRef(99)
@@ -176,7 +176,7 @@ func TestCachingChainShorteningReorg(t *testing.T) {
 func TestCachingDeepReorg(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// from cache
 	l1Head := mockL1BlockRef(100)
@@ -226,7 +226,7 @@ func TestCachingDeepReorg(t *testing.T) {
 func TestCachingSkipAhead(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// from cache
 	l1Head := mockL1BlockRef(100)
@@ -261,7 +261,7 @@ func TestCachingSkipAhead(t *testing.T) {
 func TestCacheSizeEviction(t *testing.T) {
 	ctx := context.Background()
 	l1Fetcher := &testutils.MockL1Source{}
-	l1Tracker := NewL1Tracker(l1Fetcher)
+	l1Tracker := NewL1Tracker(l1Fetcher, 1000)
 
 	// insert 1000 elements into the cache
 	for idx := 1000; idx < 2000; idx++ {
