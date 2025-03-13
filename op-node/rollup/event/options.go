@@ -1,6 +1,11 @@
 package event
 
-import "golang.org/x/time/rate"
+import (
+	"os"
+	"strconv"
+
+	"golang.org/x/time/rate"
+)
 
 type ExecutorOpts struct {
 	Capacity int // If there is a local buffer capacity
@@ -33,14 +38,28 @@ const eventsLimit = rate.Limit(10_000)
 const eventsBurst = 500
 
 func DefaultRegisterOpts() *RegisterOpts {
+	emitRate := eventsLimit
+	if str, ok := os.LookupEnv("OP_NODE_EVENT_RATE_LIMIT"); ok {
+		if e, err := strconv.ParseUint(str, 10, 64); err == nil {
+			emitRate = rate.Limit(e)
+		}
+	}
+
+	burst := eventsBurst
+	if str, ok := os.LookupEnv("OP_NODE_EVENT_BURST_LIMIT"); ok {
+		if e, err := strconv.ParseInt(str, 10, 64); err == nil {
+			burst = int(e)
+		}
+	}
+
 	return &RegisterOpts{
 		Executor: ExecutorOpts{
 			Capacity: eventsBuffer,
 		},
 		Emitter: EmitterOpts{
 			Limiting:  true,
-			Rate:      eventsLimit,
-			Burst:     eventsBurst,
+			Rate:      emitRate,
+			Burst:     burst,
 			OnLimited: nil,
 		},
 	}
