@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -17,8 +19,9 @@ type GlobalSyncExec struct {
 	eventsLock sync.Mutex
 	events     []AnnotatedEvent
 
-	handles     []*globalHandle
-	handlesLock sync.RWMutex
+	handles          []*globalHandle
+	handlesLock      sync.RWMutex
+	sanityEventLimit uint64
 
 	ctx context.Context
 }
@@ -26,7 +29,15 @@ type GlobalSyncExec struct {
 var _ Executor = (*GlobalSyncExec)(nil)
 
 func NewGlobalSynchronous(ctx context.Context) *GlobalSyncExec {
-	return &GlobalSyncExec{ctx: ctx}
+
+	gse := &GlobalSyncExec{ctx: ctx}
+	gse.sanityEventLimit = sanityEventLimit
+	if str, ok := os.LookupEnv("OP_NODE_EVENT_RATE_LIMIT"); ok {
+		if e, err := strconv.ParseUint(str, 10, 64); err == nil {
+			gse.sanityEventLimit = e
+		}
+	}
+	return gse
 }
 
 func (gs *GlobalSyncExec) Add(d Executable, _ *ExecutorOpts) (leaveExecutor func()) {
@@ -55,7 +66,7 @@ func (gs *GlobalSyncExec) Enqueue(ev AnnotatedEvent) error {
 	gs.eventsLock.Lock()
 	defer gs.eventsLock.Unlock()
 	// sanity limit, never queue too many events
-	if len(gs.events) >= sanityEventLimit {
+	if len(gs.events) >= int(gs.sanityEventLimit) {
 		return fmt.Errorf("something is very wrong, queued up too many events! Dropping event %q", ev)
 	}
 	gs.events = append(gs.events, ev)
