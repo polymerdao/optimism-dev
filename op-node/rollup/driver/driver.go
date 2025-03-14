@@ -2,9 +2,13 @@ package driver
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	"golang.org/x/time/rate"
 
 	altda "github.com/ethereum-optimism/optimism/op-alt-da"
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
@@ -229,7 +233,35 @@ func NewDriver(
 	}
 	sys.Register("sync", syncDeriver, opts)
 
-	sys.Register("engine", engine.NewEngDeriver(log, driverCtx, cfg, metrics, ec), opts)
+	{
+		emitRate := rate.Limit(10_000)
+		if str, ok := os.LookupEnv("OP_NODE_DERIVER_EVENT_RATE_LIMIT"); ok {
+			if e, err := strconv.ParseUint(str, 10, 64); err == nil {
+				emitRate = rate.Limit(e)
+			}
+		}
+
+		burst := 500
+		if str, ok := os.LookupEnv("OP_NODE_DERIVER_EVENT_BURST_LIMIT"); ok {
+			if e, err := strconv.ParseInt(str, 10, 64); err == nil {
+				burst = int(e)
+			}
+		}
+		fmt.Printf("xxx emit rate:%v, burst:%v\n", emitRate, burst)
+
+		newopts := &event.RegisterOpts{
+			Executor: event.ExecutorOpts{
+				Capacity: 200,
+			},
+			Emitter: event.EmitterOpts{
+				Limiting:  true,
+				Rate:      emitRate,
+				Burst:     burst,
+				OnLimited: nil,
+			},
+		}
+		sys.Register("engine", engine.NewEngDeriver(log, driverCtx, cfg, metrics, ec), newopts)
+	}
 
 	schedDeriv := NewStepSchedulingDeriver(log)
 	sys.Register("step-scheduler", schedDeriv, opts)
