@@ -2,6 +2,7 @@ package driver
 
 import (
 	"context"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -213,6 +214,21 @@ func NewDriver(
 	sys.Register("pipeline",
 		derive.NewPipelineDeriver(driverCtx, derivationPipeline), opts)
 
+	var sequencer sequencing.SequencerIface
+	driverEmitter := sys.Register("driver", nil, opts)
+	if gs, ok := drain.(*event.GlobalSyncExec); ok {
+		gs.SetQueueJumper(func() *event.AnnotatedEvent {
+			nextAction, ok := sequencer.NextAction()
+			if !ok {
+				return nil
+			}
+			if nextAction.After(time.Now()) {
+				return nil
+			}
+			driverEmitter.Emit(sequencing.SequencerActionEvent{})
+			return &event.AnnotatedEvent{Event: sequencing.SequencerActionEvent{}}
+		})
+	}
 	syncDeriver := &SyncDeriver{
 		Derivation:     derivationPipeline,
 		SafeHeadNotifs: safeHeadListener,
@@ -234,7 +250,6 @@ func NewDriver(
 	schedDeriv := NewStepSchedulingDeriver(log)
 	sys.Register("step-scheduler", schedDeriv, opts)
 
-	var sequencer sequencing.SequencerIface
 	if driverCfg.SequencerEnabled {
 		asyncGossiper := async.NewAsyncGossiper(driverCtx, network, log, metrics)
 		attrBuilder := derive.NewFetchingAttributesBuilder(cfg, l1, l2)
@@ -248,7 +263,6 @@ func NewDriver(
 		sequencer = sequencing.DisabledSequencer{}
 	}
 
-	driverEmitter := sys.Register("driver", nil, opts)
 	driver := &Driver{
 		statusTracker:    statusTracker,
 		SyncDeriver:      syncDeriver,

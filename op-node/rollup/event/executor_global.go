@@ -13,6 +13,8 @@ import (
 // At some point it's better to drop events and warn something is exploding the number of events.
 const sanityEventLimit = 10_000
 
+type QueueJumperFunc = func() *AnnotatedEvent
+
 type GlobalSyncExec struct {
 	eventsLock sync.Mutex
 	events     []AnnotatedEvent
@@ -21,6 +23,8 @@ type GlobalSyncExec struct {
 	handlesLock sync.RWMutex
 
 	ctx context.Context
+
+	jumper QueueJumperFunc
 }
 
 var _ Executor = (*GlobalSyncExec)(nil)
@@ -83,12 +87,24 @@ func (gs *GlobalSyncExec) processEvent(ev AnnotatedEvent) {
 	}
 }
 
+func (gs *GlobalSyncExec) SetQueueJumper(jumper QueueJumperFunc) {
+	gs.jumper = jumper
+}
+
 func (gs *GlobalSyncExec) Drain() error {
 	for {
 		if gs.ctx.Err() != nil {
 			return gs.ctx.Err()
 		}
-		ev := gs.pop()
+		ev := func() AnnotatedEvent {
+			if gs.jumper != nil {
+				if e := gs.jumper(); e != nil {
+					return *e
+				}
+			}
+			return gs.pop()
+		}()
+
 		if ev.Event == nil {
 			return nil
 		}
