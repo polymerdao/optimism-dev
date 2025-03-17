@@ -216,15 +216,17 @@ func NewDriver(
 
 	var sequencer sequencing.SequencerIface
 	driverEmitter := sys.Register("driver", nil, opts)
+	var prevTime time.Time
 	if gs, ok := drain.(*event.GlobalSyncExec); ok {
 		gs.SetQueueJumper(func() *event.AnnotatedEvent {
 			nextAction, ok := sequencer.NextAction()
 			if !ok {
 				return nil
 			}
-			if nextAction.After(time.Now()) {
+			if nextAction.Equal(prevTime) || nextAction.After(time.Now()) {
 				return nil
 			}
+			prevTime = nextAction
 			driverEmitter.Emit(sequencing.SequencerActionEvent{})
 			return &event.AnnotatedEvent{Event: sequencing.SequencerActionEvent{}}
 		})
